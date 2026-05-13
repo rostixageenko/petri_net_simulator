@@ -1,0 +1,38 @@
+{
+  "name": "Mutex: two processes contending for a shared resource",
+  "places": [
+    {"id": "p1_idle", "label": "P1 idle", "tokens": 1},
+    {"id": "p1_wait", "label": "P1 waiting", "tokens": 0},
+    {"id": "p1_cs", "label": "P1 in CS", "tokens": 0},
+    {"id": "p2_idle", "label": "P2 idle", "tokens": 1},
+    {"id": "p2_wait", "label": "P2 waiting", "tokens": 0},
+    {"id": "p2_cs", "label": "P2 in CS", "tokens": 0},
+    {"id": "mutex", "label": "Mutex", "tokens": 1}
+  ],
+  "transitions": [
+    {"id": "t1_request", "label": "P1 request", "fire_time": 0.2},
+    {"id": "t1_enter", "label": "P1 enter CS", "fire_time": 0.5},
+    {"id": "t1_release", "label": "P1 release", "fire_time": 0.3},
+    {"id": "t2_request", "label": "P2 request", "fire_time": 0.2},
+    {"id": "t2_enter", "label": "P2 enter CS", "fire_time": 0.5},
+    {"id": "t2_release", "label": "P2 release", "fire_time": 0.3}
+  ],
+  "arcs": [
+    {"id": "a1", "source": "p1_idle", "target": "t1_request", "weight": 1},
+    {"id": "a2", "source": "t1_request", "target": "p1_wait", "weight": 1},
+    {"id": "a3", "source": "p1_wait", "target": "t1_enter", "weight": 1},
+    {"id": "a4", "source": "mutex", "target": "t1_enter", "weight": 1},
+    {"id": "a5", "source": "t1_enter", "target": "p1_cs", "weight": 1},
+    {"id": "a6", "source": "p1_cs", "target": "t1_release", "weight": 1},
+    {"id": "a7", "source": "t1_release", "target": "p1_idle", "weight": 1},
+    {"id": "a8", "source": "t1_release", "target": "mutex", "weight": 1},
+    {"id": "a9", "source": "p2_idle", "target": "t2_request", "weight": 1},
+    {"id": "a10", "source": "t2_request", "target": "p2_wait", "weight": 1},
+    {"id": "a11", "source": "p2_wait", "target": "t2_enter", "weight": 1},
+    {"id": "a12", "source": "mutex", "target": "t2_enter", "weight": 1},
+    {"id": "a13", "source": "t2_enter", "target": "p2_cs", "weight": 1},
+    {"id": "a14", "source": "p2_cs", "target": "t2_release", "weight": 1},
+    {"id": "a15", "source": "t2_release", "target": "p2_idle", "weight": 1},
+    {"id": "a16", "source": "t2_release", "target": "mutex", "weight": 1}
+  ]
+}
