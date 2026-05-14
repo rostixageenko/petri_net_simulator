@@ -1,8 +1,11 @@
 #include "petri/service_adapter/json_api.hpp"
 
+#include "petri/logging_metrics/metrics_logger.hpp"
+
 #include <exception>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace petri {
 namespace {
@@ -12,6 +15,74 @@ std::string request_id_from(const nlohmann::json& request) {
         return request.at("request_id").get<std::string>();
     }
     return "";
+}
+
+struct NetCounts {
+    std::size_t places = 0;
+    std::size_t transitions = 0;
+    std::size_t arcs = 0;
+};
+
+std::size_t array_field_size(const nlohmann::json& object, const std::string& field) {
+    if (object.is_object() && object.contains(field) && object.at(field).is_array()) {
+        return object.at(field).size();
+    }
+    return 0;
+}
+
+NetCounts net_counts_from_request(const nlohmann::json& request) {
+    if (!request.is_object() || !request.contains("net") || !request.at("net").is_object()) {
+        return {};
+    }
+    const auto& net = request.at("net");
+    return NetCounts{
+        array_field_size(net, "places"),
+        array_field_size(net, "transitions"),
+        array_field_size(net, "arcs"),
+    };
+}
+
+NetCounts net_counts_from_net(const PetriNet& net) {
+    return NetCounts{net.places().size(), net.transitions().size(), net.arcs().size()};
+}
+
+std::string algorithm_from_request(const nlohmann::json& request) {
+    if (request.is_object() && request.contains("params") && request.at("params").is_object() &&
+        request.at("params").contains("algorithm") && request.at("params").at("algorithm").is_string()) {
+        return request.at("params").at("algorithm").get<std::string>();
+    }
+    return "bfs";
+}
+
+std::string graph_mode_from_request(const nlohmann::json& request) {
+    if (request.is_object() && request.contains("params") && request.at("params").is_object() &&
+        request.at("params").contains("graph_mode") && request.at("params").at("graph_mode").is_string()) {
+        return request.at("params").at("graph_mode").get<std::string>();
+    }
+    return "reachability_graph";
+}
+
+void log_metrics_record(const std::string& request_id, const std::string& algorithm_name,
+                        const std::string& task_type, const NetCounts& counts,
+                        std::size_t built_state_count, std::size_t scanned_edge_count,
+                        double elapsed_ms, bool found, double path_cost, std::size_t path_length,
+                        const std::string& error_message) {
+    const auto record = create_metrics_record(RunMetricsInput{
+        request_id,
+        algorithm_name,
+        task_type,
+        counts.places,
+        counts.transitions,
+        counts.arcs,
+        built_state_count,
+        scanned_edge_count,
+        elapsed_ms,
+        found,
+        path_cost,
+        path_length,
+        error_message,
+    });
+    (void)append_metrics_record(record);
 }
 
 nlohmann::json event_to_json(const PetriNet& net, const SimulationEvent& event) {
@@ -188,12 +259,17 @@ nlohmann::json simulate_request(const nlohmann::json& request) {
     try {
         auto net_result = net_from_request(request);
         if (!net_result) {
+            log_metrics_record(request_id, "simulation", "simulation", net_counts_from_request(request),
+                               0, 0, 0.0, false, 0.0, 0, net_result.error().message);
             return error_response(request_id, net_result.error());
         }
         const PetriNet& net = net_result.value();
+        const NetCounts counts = net_counts_from_net(net);
 
         auto params_result = params_from_request(request);
         if (!params_result) {
+            log_metrics_record(request_id, "simulation", "simulation", counts,
+                               0, 0, 0.0, false, 0.0, 0, params_result.error().message);
             return error_response(request_id, params_result.error());
         }
         const nlohmann::json params_json = params_result.value();
@@ -201,17 +277,23 @@ nlohmann::json simulate_request(const nlohmann::json& request) {
         SimulationParams params;
         auto max_steps = read_size_t_field(params_json, "max_steps", params.max_steps);
         if (!max_steps) {
+            log_metrics_record(request_id, "simulation", "simulation", counts,
+                               0, 0, 0.0, false, 0.0, 0, max_steps.error().message);
             return error_response(request_id, max_steps.error());
         }
         params.max_steps = max_steps.value();
 
         auto strategy_value = read_optional_string_field(params_json, "strategy");
         if (!strategy_value) {
+            log_metrics_record(request_id, "simulation", "simulation", counts,
+                               0, 0, 0.0, false, 0.0, 0, strategy_value.error().message);
             return error_response(request_id, strategy_value.error());
         }
         if (strategy_value.value()) {
             auto strategy = parse_strategy(*strategy_value.value());
             if (!strategy) {
+                log_metrics_record(request_id, "simulation", "simulation", counts,
+                                   0, 0, 0.0, false, 0.0, 0, strategy.error().message);
                 return error_response(request_id, strategy.error());
             }
             params.strategy = strategy.value();
@@ -219,18 +301,24 @@ nlohmann::json simulate_request(const nlohmann::json& request) {
 
         auto stop_on_deadlock = read_bool_field(params_json, "stop_on_deadlock", params.stop_on_deadlock);
         if (!stop_on_deadlock) {
+            log_metrics_record(request_id, "simulation", "simulation", counts,
+                               0, 0, 0.0, false, 0.0, 0, stop_on_deadlock.error().message);
             return error_response(request_id, stop_on_deadlock.error());
         }
         params.stop_on_deadlock = stop_on_deadlock.value();
 
         auto return_events = read_bool_field(params_json, "return_events", params.return_events);
         if (!return_events) {
+            log_metrics_record(request_id, "simulation", "simulation", counts,
+                               0, 0, 0.0, false, 0.0, 0, return_events.error().message);
             return error_response(request_id, return_events.error());
         }
         params.return_events = return_events.value();
 
         auto transition_id = read_optional_string_field(params_json, "transition_id");
         if (!transition_id) {
+            log_metrics_record(request_id, "simulation", "simulation", counts,
+                               0, 0, 0.0, false, 0.0, 0, transition_id.error().message);
             return error_response(request_id, transition_id.error());
         }
         params.transition_id = transition_id.value();
@@ -238,6 +326,9 @@ nlohmann::json simulate_request(const nlohmann::json& request) {
         Interpreter interpreter(net);
         auto run_result = interpreter.run(params);
         if (!run_result) {
+            log_metrics_record(request_id, "simulation", "simulation", counts,
+                               0, 0, 0.0, false, interpreter.current_time(), 0,
+                               run_result.error().message);
             return error_response(request_id, run_result.error());
         }
 
@@ -255,46 +346,68 @@ nlohmann::json simulate_request(const nlohmann::json& request) {
         result["metrics"]["elapsed_ms"] = run.elapsed_ms;
         result["metrics"]["steps_executed"] = run.steps_executed;
         result["metrics"]["deadlock"] = run.deadlock;
+        log_metrics_record(request_id, "simulation", "simulation", counts,
+                           run.steps_executed + 1, 0, run.elapsed_ms, true,
+                           interpreter.current_time(), run.steps_executed, "");
         return result;
     } catch (const std::exception& ex) {
+        log_metrics_record(request_id, "simulation", "simulation", net_counts_from_request(request),
+                           0, 0, 0.0, false, 0.0, 0, ex.what());
         return error_response(request_id, make_error("INVALID_JSON", ex.what()));
     }
 }
 
 nlohmann::json algorithm_request(const nlohmann::json& request) {
     const std::string request_id = request_id_from(request);
+    const std::string requested_algorithm = algorithm_from_request(request);
+    const std::string requested_graph_mode = graph_mode_from_request(request);
     try {
         auto net_result = net_from_request(request);
         if (!net_result) {
+            log_metrics_record(request_id, requested_algorithm, requested_graph_mode,
+                               net_counts_from_request(request), 0, 0, 0.0, false, 0.0, 0,
+                               net_result.error().message);
             return error_response(request_id, net_result.error());
         }
         const PetriNet& net = net_result.value();
+        const NetCounts counts = net_counts_from_net(net);
 
         auto params_result = params_from_request(request);
         if (!params_result) {
+            log_metrics_record(request_id, requested_algorithm, requested_graph_mode, counts,
+                               0, 0, 0.0, false, 0.0, 0, params_result.error().message);
             return error_response(request_id, params_result.error());
         }
         const nlohmann::json params_json = params_result.value();
 
         auto graph_mode_result = read_string_field(params_json, "graph_mode", "reachability_graph");
         if (!graph_mode_result) {
+            log_metrics_record(request_id, requested_algorithm, requested_graph_mode, counts,
+                               0, 0, 0.0, false, 0.0, 0, graph_mode_result.error().message);
             return error_response(request_id, graph_mode_result.error());
         }
         const std::string graph_mode = graph_mode_result.value();
         if (graph_mode != "reachability_graph") {
-            return error_response(request_id, make_error("INVALID_JSON", "Only reachability_graph is supported in this slice",
-                                                        {{"graph_mode", graph_mode}}));
+            const auto error = make_error("INVALID_JSON", "Only reachability_graph is supported in this slice",
+                                          {{"graph_mode", graph_mode}});
+            log_metrics_record(request_id, requested_algorithm, graph_mode, counts,
+                               0, 0, 0.0, false, 0.0, 0, error.message);
+            return error_response(request_id, error);
         }
 
         ReachabilityOptions options;
         auto max_states = read_size_t_field(params_json, "max_states", options.max_states);
         if (!max_states) {
+            log_metrics_record(request_id, requested_algorithm, graph_mode, counts,
+                               0, 0, 0.0, false, 0.0, 0, max_states.error().message);
             return error_response(request_id, max_states.error());
         }
         options.max_states = max_states.value();
 
         auto max_depth = read_size_t_field(params_json, "max_depth", options.max_depth);
         if (!max_depth) {
+            log_metrics_record(request_id, requested_algorithm, graph_mode, counts,
+                               0, 0, 0.0, false, 0.0, 0, max_depth.error().message);
             return error_response(request_id, max_depth.error());
         }
         options.max_depth = max_depth.value();
@@ -302,18 +415,25 @@ nlohmann::json algorithm_request(const nlohmann::json& request) {
         if (params_json.contains("target_marking")) {
             auto validation = validate_target_marking(net, params_json.at("target_marking"));
             if (!validation) {
+                log_metrics_record(request_id, requested_algorithm, graph_mode, counts,
+                                   0, 0, 0.0, false, 0.0, 0, validation.error().message);
                 return error_response(request_id, validation.error());
             }
         }
 
         auto reachability = build_reachability_graph(net, options);
         if (!reachability) {
+            log_metrics_record(request_id, requested_algorithm, graph_mode, counts,
+                               0, 0, 0.0, false, 0.0, 0, reachability.error().message);
             return error_response(request_id, reachability.error());
         }
+        const std::size_t built_states = reachability.value().graph.vertex_count();
 
         AlgorithmParams algorithm_params;
         auto source_result = read_string_field(params_json, "source", "initial");
         if (!source_result) {
+            log_metrics_record(request_id, requested_algorithm, graph_mode, counts,
+                               built_states, 0, 0.0, false, 0.0, 0, source_result.error().message);
             return error_response(request_id, source_result.error());
         }
         const std::string source = source_result.value();
@@ -321,6 +441,8 @@ nlohmann::json algorithm_request(const nlohmann::json& request) {
 
         auto target_result = read_optional_string_field(params_json, "target");
         if (!target_result) {
+            log_metrics_record(request_id, requested_algorithm, graph_mode, counts,
+                               built_states, 0, 0.0, false, 0.0, 0, target_result.error().message);
             return error_response(request_id, target_result.error());
         }
         if (target_result.value()) {
@@ -328,6 +450,8 @@ nlohmann::json algorithm_request(const nlohmann::json& request) {
         } else if (params_json.contains("target_marking")) {
             auto target = find_marking_vertex(net, reachability.value(), params_json.at("target_marking"));
             if (!target) {
+                log_metrics_record(request_id, requested_algorithm, graph_mode, counts,
+                                   built_states, 0, 0.0, false, 0.0, 0, target.error().message);
                 return error_response(request_id, target.error());
             }
             algorithm_params.target_vertex_id = target.value();
@@ -335,24 +459,32 @@ nlohmann::json algorithm_request(const nlohmann::json& request) {
 
         auto algorithm_name = read_string_field(params_json, "algorithm", "bfs");
         if (!algorithm_name) {
+            log_metrics_record(request_id, requested_algorithm, graph_mode, counts,
+                               built_states, 0, 0.0, false, 0.0, 0, algorithm_name.error().message);
             return error_response(request_id, algorithm_name.error());
         }
         const std::string algorithm = algorithm_name.value();
 
         auto algorithm_result = run_algorithm(algorithm, reachability.value().graph, algorithm_params);
         if (!algorithm_result) {
+            log_metrics_record(request_id, algorithm, graph_mode, counts,
+                               built_states, 0, 0.0, false, 0.0, 0, algorithm_result.error().message);
             return error_response(request_id, algorithm_result.error());
         }
 
         const auto& result_value = algorithm_result.value();
         if (!result_value.found && algorithm_params.target_vertex_id) {
-            return error_response(request_id, make_error(
+            const auto error = make_error(
                 "TARGET_NOT_FOUND", "Target is not reachable from source",
                 {{"source", algorithm_params.source_vertex_id},
                  {"target", *algorithm_params.target_vertex_id},
                  {"algorithm", algorithm},
                  {"visited_vertices", std::to_string(result_value.metrics.visited_vertices)},
-                 {"scanned_edges", std::to_string(result_value.metrics.scanned_edges)}}));
+                 {"scanned_edges", std::to_string(result_value.metrics.scanned_edges)}});
+            log_metrics_record(request_id, algorithm, graph_mode, counts,
+                               built_states, result_value.metrics.scanned_edges, result_value.metrics.elapsed_ms,
+                               false, result_value.metrics.path_cost, result_value.metrics.path_length, error.message);
+            return error_response(request_id, error);
         }
 
         nlohmann::json result = nlohmann::json::object();
@@ -365,8 +497,13 @@ nlohmann::json algorithm_request(const nlohmann::json& request) {
         result["metrics"] = algorithm_metrics_to_json(result_value.metrics);
         result["graph"]["vertices"] = reachability.value().graph.vertex_count();
         result["graph"]["edges"] = reachability.value().graph.edge_count();
+        log_metrics_record(request_id, result_value.algorithm, graph_mode, counts,
+                           built_states, result_value.metrics.scanned_edges, result_value.metrics.elapsed_ms,
+                           result_value.found, result_value.metrics.path_cost, result_value.metrics.path_length, "");
         return result;
     } catch (const std::exception& ex) {
+        log_metrics_record(request_id, requested_algorithm, requested_graph_mode,
+                           net_counts_from_request(request), 0, 0, 0.0, false, 0.0, 0, ex.what());
         return error_response(request_id, make_error("INVALID_JSON", ex.what()));
     }
 }

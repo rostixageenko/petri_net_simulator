@@ -12,6 +12,7 @@ add_library(petri_core
     src/core_pn/petri_net.cpp
     src/graph_models/directed_graph.cpp
     src/graph_models/reachability.cpp
+    src/logging_metrics/metrics_logger.cpp
     src/runtime/algorithm_runtime.cpp
     src/service_adapter/json_api.cpp
 )
@@ -37,6 +38,7 @@ add_executable(petri_tests
     tests/algorithms_tests.cpp
     tests/core_pn_tests.cpp
     tests/integration_tests.cpp
+    tests/metrics_logger_tests.cpp
     tests/service_adapter_tests.cpp
 )
 target_link_libraries(petri_tests PRIVATE petri_core)

@@ -34,6 +34,8 @@ petri_net_simulator/
       graph_models/
         directed_graph.hpp
         reachability.hpp
+      logging_metrics/
+        metrics_logger.hpp
       runtime/
         algorithm_runtime.hpp
       service_adapter/
@@ -49,6 +51,8 @@ petri_net_simulator/
     graph_models/
       directed_graph.cpp
       reachability.cpp
+    logging_metrics/
+      metrics_logger.cpp
     runtime/
       algorithm_runtime.cpp
     service_adapter/
@@ -57,10 +61,13 @@ petri_net_simulator/
     algorithms_tests.cpp
     core_pn_tests.cpp
     integration_tests.cpp
+    metrics_logger_tests.cpp
     service_adapter_tests.cpp
     test_main.cpp
   docs/
     CODE_DOCUMENTATION.md
+  logs/
+    .gitkeep
   build/
 ```
 
@@ -73,6 +80,7 @@ petri_net_simulator/
 - `tests/` содержит тесты на `doctest`.
 - `examples/` содержит пример JSON-описания сети Петри.
 - `docs/` содержит документацию к проекту.
+- `logs/` содержит файл `.gitkeep` и используется для JSONL-журнала метрик запусков. Сами `.jsonl` и `.csv` файлы игнорируются Git.
 - `include/nlohmann/json.hpp` содержит подключённую header-only библиотеку для работы с JSON.
 - `include/doctest/doctest.h` содержит подключённый header-only фреймворк тестирования.
 
@@ -216,6 +224,8 @@ petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 
 `tests/integration_tests.cpp` проверяет совместную работу сети Петри, графа достижимости и алгоритмов.
 
+`tests/metrics_logger_tests.cpp` проверяет создание записи метрик, сохранение и чтение JSONL-файла, а также автоматическую запись успешного и ошибочного запуска через JSON service adapter.
+
 `tests/service_adapter_tests.cpp` проверяет JSON-ответы симуляции, JSON-ответы алгоритма и структурированную ошибку для некорректного запроса.
 
 ## 3. Подробное описание кода
@@ -305,6 +315,44 @@ petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 - `enabled_after` — переходы, разрешённые после шага.
 
 Роль файла: он задаёт простые типы, на которых строятся `PetriNet`, `Interpreter`, граф достижимости и JSON-ответы.
+
+### `include/petri/logging_metrics/metrics_logger.hpp` и `src/logging_metrics/metrics_logger.cpp`
+
+Эти файлы реализуют модуль `logging_metrics`, который формирует и сохраняет метрики запусков симуляции и алгоритмов.
+
+Публичные структуры:
+
+- `RunMetricsInput` — входные данные для создания записи метрик;
+- `RunMetricsRecord` — готовая запись метрик.
+
+Запись содержит:
+
+- `request_id`;
+- `algorithm_name` — имя алгоритма или `simulation` для симуляции;
+- `task_type` — тип задачи, например `simulation` или `reachability_graph`;
+- `place_count`, `transition_count`, `arc_count`;
+- `built_state_count`;
+- `scanned_edge_count`;
+- `elapsed_ms`;
+- `found`;
+- `path_cost`;
+- `path_length`;
+- `error_message`.
+
+Публичные функции:
+
+- `create_metrics_record(input)` создаёт запись метрик;
+- `metrics_record_to_json(record)` преобразует запись в JSON;
+- `metrics_record_from_json(data)` восстанавливает запись из JSON;
+- `default_metrics_log_path()` возвращает путь `logs/metrics.jsonl`;
+- `append_metrics_record(record)` добавляет запись в стандартный JSONL-журнал;
+- `append_metrics_record(record, path)` добавляет запись в указанный JSONL-файл;
+- `read_metrics_records()` читает записи из стандартного JSONL-журнала;
+- `read_metrics_records(path)` читает записи из указанного JSONL-файла.
+
+Формат хранения — JSONL: каждая строка файла является отдельным JSON-объектом метрик. Перед записью модуль создаёт родительскую папку, если её ещё нет. Ошибки записи и чтения возвращаются через `Result` с кодом `METRICS_LOG_ERROR`; ошибки разбора JSONL возвращаются с кодом `INVALID_JSON`.
+
+JSON service adapter вызывает этот модуль для каждого запуска `simulate_request()` и `algorithm_request()`. Успешные запуски записываются с пустым `error_message`; ошибочные запуски записываются с `found = false` и человекочитаемым сообщением ошибки.
 
 ### `include/petri/core_pn/petri_net.hpp` и `src/core_pn/petri_net.cpp`
 
@@ -607,6 +655,9 @@ UNKNOWN_ALGORITHM
 Внутренние вспомогательные функции:
 
 - `request_id_from()` достаёт `request_id`, если он есть;
+- `net_counts_from_request()` и `net_counts_from_net()` получают размеры сети для записи метрик;
+- `algorithm_from_request()` и `graph_mode_from_request()` достают значения для журнала метрик даже при ошибочных запросах;
+- `log_metrics_record()` создаёт запись `RunMetricsRecord` и добавляет её в `logs/metrics.jsonl`;
 - `event_to_json()` преобразует `SimulationEvent` в JSON;
 - `algorithm_metrics_to_json()` преобразует `AlgorithmMetrics` в JSON;
 - `params_from_request()` проверяет, что `params` отсутствует или является объектом;
@@ -941,7 +992,6 @@ build/Testing/Temporary/LastTest.log
 
 - Python-биндинги через `pybind11`.
 - HTTP-сервис или отдельный серверный адаптер.
-- Отдельный модуль `metrics`. Сейчас метрики хранятся внутри `SimulationRun` и `AlgorithmMetrics`.
 - Отдельные представления FSF и BSF для графов.
 - Режим `structural_graph` в JSON API. Сейчас `algorithm_request()` принимает только `reachability_graph`.
 - Ингибиторные, цветные и стохастические сети Петри.

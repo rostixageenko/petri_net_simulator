@@ -8,3 +8,6 @@ out/
 *.obj
 *.exe
 *.lib
+logs/*.jsonl
+logs/*.csv
+!logs/.gitkeep
