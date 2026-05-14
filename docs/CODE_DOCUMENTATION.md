@@ -62,6 +62,7 @@ petri_net_simulator/
     core_pn_tests.cpp
     integration_tests.cpp
     metrics_logger_tests.cpp
+    runtime_tests.cpp
     service_adapter_tests.cpp
     test_main.cpp
   docs/
@@ -180,16 +181,30 @@ petri_net_simulator/
 
 ### Runtime выбора алгоритма
 
-`include/petri/runtime/algorithm_runtime.hpp` объявляет функцию `run_algorithm()`.
+`include/petri/runtime/algorithm_runtime.hpp` объявляет единый runtime-интерфейс алгоритмов:
 
-`src/runtime/algorithm_runtime.cpp` реализует выбор алгоритма по строковому имени:
+- `AlgorithmRunContext` — контекст запуска для логирования метрик;
+- `AlgorithmTask` — описание задачи алгоритма: имя алгоритма, граф и контекст;
+- `Algorithm` — базовый интерфейс алгоритма с методами `name()` и `run(graph, params)`;
+- `AlgorithmRunner` — функциональный тип для регистрации алгоритма без отдельного класса;
+- `AlgorithmRegistry` — реестр алгоритмов;
+- `create_builtin_algorithm_registry()` создаёт реестр со встроенными алгоритмами;
+- `available_algorithms()` возвращает список встроенных алгоритмов;
+- `run(task, params)` запускает задачу через встроенный реестр;
+- `run_algorithm(name, graph, params)` оставлен как совместимый фасад.
+
+`src/runtime/algorithm_runtime.cpp` реализует реестр алгоритмов. Встроенный реестр регистрирует:
 
 - `"dfs"` вызывает `run_dfs()`;
 - `"bfs"` вызывает `run_bfs()`;
 - `"dijkstra"` вызывает `run_dijkstra()`;
 - неизвестное имя возвращает ошибку `UNKNOWN_ALGORITHM`.
 
-Этот слой используется JSON-адаптером, чтобы внешний запрос мог указывать алгоритм строкой.
+`AlgorithmRegistry` умеет регистрировать объект `Algorithm` или функциональный `AlgorithmRunner`. Это оставляет архитектурное место для будущих пользовательских алгоритмов и плагинов без реализации механизма загрузки плагинов в текущей версии.
+
+Если в `AlgorithmTask.context.log_metrics` установлено `true`, runtime создаёт запись `RunMetricsRecord` и сохраняет её через модуль `logging_metrics`. Для успешного запуска записываются метрики из `AlgorithmResult.metrics`; для ошибки неизвестного алгоритма или ошибки выполнения записывается `found = false` и сообщение ошибки.
+
+Этот слой используется JSON-адаптером, чтобы внешний запрос мог указывать алгоритм строкой и запускать его через единый интерфейс.
 
 ### JSON-адаптер
 
@@ -225,6 +240,8 @@ petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 `tests/integration_tests.cpp` проверяет совместную работу сети Петри, графа достижимости и алгоритмов.
 
 `tests/metrics_logger_tests.cpp` проверяет создание записи метрик, сохранение и чтение JSONL-файла, а также автоматическую запись успешного и ошибочного запуска через JSON service adapter.
+
+`tests/runtime_tests.cpp` проверяет список встроенных алгоритмов в runtime, запуск через `AlgorithmTask`, регистрацию функционального алгоритма в `AlgorithmRegistry`, ошибку `UNKNOWN_ALGORITHM` и запись метрик runtime.
 
 `tests/service_adapter_tests.cpp` проверяет JSON-ответы симуляции, JSON-ответы алгоритма и структурированную ошибку для некорректного запроса.
 
@@ -616,27 +633,29 @@ Id вершин имеют вид `m0`, `m1`, `m2` и так далее. Id рё
 
 ### `include/petri/runtime/algorithm_runtime.hpp` и `src/runtime/algorithm_runtime.cpp`
 
-Файл `algorithm_runtime.hpp` объявляет:
+Файл `algorithm_runtime.hpp` объявляет единый интерфейс запуска алгоритмов:
 
-```cpp
-Result<AlgorithmResult> run_algorithm(const std::string& name,
-                                      const DirectedGraph& graph,
-                                      const AlgorithmParams& params);
-```
+- `AlgorithmRunContext` хранит контекст запуска для метрик: `request_id`, `task_type`, размеры сети, число построенных состояний, флаг `log_metrics` и необязательный путь к файлу метрик;
+- `AlgorithmTask` хранит имя алгоритма, указатель на `DirectedGraph` и `AlgorithmRunContext`;
+- `Algorithm` задаёт общий интерфейс алгоритма: `name()` и `run(graph, params)`;
+- `AlgorithmRunner` позволяет зарегистрировать алгоритм как функциональный объект;
+- `AlgorithmRegistry` хранит зарегистрированные алгоритмы и запускает их через единый метод `run(task, params)`;
+- `create_builtin_algorithm_registry()` создаёт реестр со встроенными `dfs`, `bfs`, `dijkstra`;
+- `available_algorithms()` возвращает список доступных встроенных алгоритмов;
+- `run(task, params)` запускает задачу через встроенный реестр;
+- `run_algorithm(name, graph, params)` оставлен для совместимости со старым кодом.
 
-Файл `algorithm_runtime.cpp` реализует эту функцию. Она выбирает алгоритм по строке:
+Файл `algorithm_runtime.cpp` реализует `AlgorithmRegistry`. Метод `register_algorithm()` принимает либо объект `Algorithm`, либо пару `name + AlgorithmRunner`. Это оставляет место для будущих пользовательских алгоритмов: внешний код сможет создать свой реестр и добавить в него новые реализации без изменения встроенных DFS/BFS/Dijkstra.
 
-- `dfs`;
-- `bfs`;
-- `dijkstra`.
+При запуске runtime проверяет:
 
-Если имя другое, возвращается ошибка:
+- что в `AlgorithmTask` есть граф;
+- что имя алгоритма зарегистрировано;
+- что выбранный алгоритм вернул успешный `AlgorithmResult`.
 
-```text
-UNKNOWN_ALGORITHM
-```
+Если имя неизвестно, возвращается ошибка `UNKNOWN_ALGORITHM`. Если `AlgorithmTask.context.log_metrics = true`, runtime записывает результат или ошибку запуска через `logging_metrics`.
 
-Роль файлов: runtime даёт единую точку запуска алгоритмов. JSON-адаптеру не нужно напрямую выбирать между `run_dfs()`, `run_bfs()` и `run_dijkstra()`.
+Роль файлов: runtime даёт единую точку регистрации, получения списка и запуска алгоритмов. JSON-адаптеру не нужно напрямую выбирать между `run_dfs()`, `run_bfs()` и `run_dijkstra()`.
 
 ### `include/petri/service_adapter/json_api.hpp` и `src/service_adapter/json_api.cpp`
 
@@ -685,7 +704,7 @@ UNKNOWN_ALGORITHM
 6. Строит граф достижимости через `build_reachability_graph()`.
 7. Определяет начальную вершину. Значение `source = "initial"` заменяется на `reachability.initial_vertex_id`.
 8. Если задан `target_marking`, ищет целевую вершину через `find_marking_vertex()`.
-9. Запускает алгоритм через `run_algorithm()`.
+9. Создаёт `AlgorithmTask` с контекстом метрик и запускает алгоритм через runtime-функцию `run(task, params)`.
 10. Если алгоритм не нашёл путь к заданной цели, возвращает ошибку `TARGET_NOT_FOUND`.
 11. Возвращает JSON с путём, метриками и количеством вершин и рёбер графа.
 

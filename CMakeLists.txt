@@ -39,6 +39,7 @@ add_executable(petri_tests
     tests/core_pn_tests.cpp
     tests/integration_tests.cpp
     tests/metrics_logger_tests.cpp
+    tests/runtime_tests.cpp
     tests/service_adapter_tests.cpp
 )
 target_link_libraries(petri_tests PRIVATE petri_core)

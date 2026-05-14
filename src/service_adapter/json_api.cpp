@@ -465,10 +465,19 @@ nlohmann::json algorithm_request(const nlohmann::json& request) {
         }
         const std::string algorithm = algorithm_name.value();
 
-        auto algorithm_result = run_algorithm(algorithm, reachability.value().graph, algorithm_params);
+        AlgorithmTask task;
+        task.algorithm_name = algorithm;
+        task.graph = &reachability.value().graph;
+        task.context.request_id = request_id;
+        task.context.task_type = graph_mode;
+        task.context.place_count = counts.places;
+        task.context.transition_count = counts.transitions;
+        task.context.arc_count = counts.arcs;
+        task.context.built_state_count = built_states;
+        task.context.log_metrics = true;
+
+        auto algorithm_result = run(task, algorithm_params);
         if (!algorithm_result) {
-            log_metrics_record(request_id, algorithm, graph_mode, counts,
-                               built_states, 0, 0.0, false, 0.0, 0, algorithm_result.error().message);
             return error_response(request_id, algorithm_result.error());
         }
 
@@ -481,9 +490,6 @@ nlohmann::json algorithm_request(const nlohmann::json& request) {
                  {"algorithm", algorithm},
                  {"visited_vertices", std::to_string(result_value.metrics.visited_vertices)},
                  {"scanned_edges", std::to_string(result_value.metrics.scanned_edges)}});
-            log_metrics_record(request_id, algorithm, graph_mode, counts,
-                               built_states, result_value.metrics.scanned_edges, result_value.metrics.elapsed_ms,
-                               false, result_value.metrics.path_cost, result_value.metrics.path_length, error.message);
             return error_response(request_id, error);
         }
 
@@ -497,9 +503,6 @@ nlohmann::json algorithm_request(const nlohmann::json& request) {
         result["metrics"] = algorithm_metrics_to_json(result_value.metrics);
         result["graph"]["vertices"] = reachability.value().graph.vertex_count();
         result["graph"]["edges"] = reachability.value().graph.edge_count();
-        log_metrics_record(request_id, result_value.algorithm, graph_mode, counts,
-                           built_states, result_value.metrics.scanned_edges, result_value.metrics.elapsed_ms,
-                           result_value.found, result_value.metrics.path_cost, result_value.metrics.path_length, "");
         return result;
     } catch (const std::exception& ex) {
         log_metrics_record(request_id, requested_algorithm, requested_graph_mode,
