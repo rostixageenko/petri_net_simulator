@@ -25,6 +25,8 @@ petri_net_simulator/
     petri/
       algorithms/
         algorithms.hpp
+      algorithm_selector/
+        algorithm_selector.hpp
       common/
         result.hpp
       core_pn/
@@ -43,6 +45,8 @@ petri_net_simulator/
   src/
     algorithms/
       algorithms.cpp
+    algorithm_selector/
+      algorithm_selector.cpp
     cli/
       petri_cli.cpp
     core_pn/
@@ -58,6 +62,7 @@ petri_net_simulator/
     service_adapter/
       json_api.cpp
   tests/
+    algorithm_selector_tests.cpp
     algorithms_tests.cpp
     core_pn_tests.cpp
     integration_tests.cpp
@@ -179,6 +184,20 @@ petri_net_simulator/
 
 `src/algorithms/algorithms.cpp` реализует DFS, BFS и алгоритм Дейкстры для `DirectedGraph`. Все три функции возвращают `Result<AlgorithmResult>`, то есть либо результат с путём и метриками, либо структурированную ошибку.
 
+### Селектор алгоритмов
+
+`include/petri/algorithm_selector/algorithm_selector.hpp` объявляет слой выбора алгоритма поверх runtime:
+
+- `SelectionWeights` — веса критериев скоринга: время выполнения, длина пути, стоимость пути и число посещённых вершин;
+- `AlgorithmCandidateReport` — строка сравнения для одного алгоритма;
+- `AlgorithmSelectionRequest` — задача, параметры, список алгоритмов и веса выбора;
+- `AlgorithmSelectionReport` — итоговый отчёт со всеми кандидатами, лучшим алгоритмом и лучшим результатом;
+- `score_algorithm_result()` считает взвешенный балл результата;
+- `select_algorithm()` запускает несколько алгоритмов через `AlgorithmRegistry` и выбирает результат с минимальным баллом;
+- `algorithm_selection_report_to_json()` формирует JSON-отчёт с таблицей сравнения.
+
+`src/algorithm_selector/algorithm_selector.cpp` реализует запуск набора алгоритмов на одной задаче. Если список алгоритмов пуст, используются все алгоритмы из переданного реестра. Ошибка отдельного алгоритма, например `UNKNOWN_ALGORITHM`, записывается в таблицу сравнения как строка со статусом `error`, но не останавливает сравнение остальных кандидатов. Если в `AlgorithmTask.context.log_metrics` включено логирование, каждый запуск кандидата проходит через runtime и сохраняет метрики тем же механизмом `logging_metrics`.
+
 ### Runtime выбора алгоритма
 
 `include/petri/runtime/algorithm_runtime.hpp` объявляет единый runtime-интерфейс алгоритмов:
@@ -236,6 +255,8 @@ petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 `tests/core_pn_tests.cpp` проверяет загрузку примера `mutex.json`, валидацию некорректных дуг и токенов, поиск разрешённых переходов, срабатывание перехода и работу интерпретатора.
 
 `tests/algorithms_tests.cpp` проверяет BFS, DFS, Dijkstra и ошибку неизвестного алгоритма.
+
+`tests/algorithm_selector_tests.cpp` проверяет взвешенный выбор BFS по длине пути, Dijkstra по стоимости пути, JSON-отчёт сравнения и строку ошибки для неизвестного алгоритма.
 
 `tests/integration_tests.cpp` проверяет совместную работу сети Петри, графа достижимости и алгоритмов.
 
@@ -985,6 +1006,13 @@ build/Testing/Temporary/LastTest.log
 - DFS для достижения цели;
 - Dijkstra для учёта весов рёбер;
 - ошибку `UNKNOWN_ALGORITHM`.
+
+`algorithm_selector_tests.cpp` проверяет:
+
+- выбор BFS при приоритете минимальной длины пути;
+- выбор Dijkstra при приоритете минимальной стоимости пути;
+- формирование JSON-отчёта с таблицей сравнения;
+- сохранение ошибочного кандидата в отчёте при неизвестном имени алгоритма.
 
 `integration_tests.cpp` проверяет:
 

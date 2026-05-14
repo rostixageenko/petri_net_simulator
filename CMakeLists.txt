@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(petri_core
     src/algorithms/algorithms.cpp
+    src/algorithm_selector/algorithm_selector.cpp
     src/core_pn/interpreter.cpp
     src/core_pn/petri_net.cpp
     src/graph_models/directed_graph.cpp
@@ -35,6 +36,7 @@ enable_testing()
 
 add_executable(petri_tests
     tests/test_main.cpp
+    tests/algorithm_selector_tests.cpp
     tests/algorithms_tests.cpp
     tests/core_pn_tests.cpp
     tests/integration_tests.cpp
