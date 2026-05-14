@@ -36,6 +36,7 @@ petri_net_simulator/
       graph_models/
         directed_graph.hpp
         reachability.hpp
+        star_forms.hpp
       logging_metrics/
         metrics_logger.hpp
       runtime/
@@ -55,6 +56,7 @@ petri_net_simulator/
     graph_models/
       directed_graph.cpp
       reachability.cpp
+      star_forms.cpp
     logging_metrics/
       metrics_logger.cpp
     runtime/
@@ -65,6 +67,7 @@ petri_net_simulator/
     algorithm_selector_tests.cpp
     algorithms_tests.cpp
     core_pn_tests.cpp
+    graph_models_tests.cpp
     integration_tests.cpp
     metrics_logger_tests.cpp
     runtime_tests.cpp
@@ -171,6 +174,16 @@ petri_net_simulator/
 
 `src/graph_models/reachability.cpp` реализует построение графа достижимости. Вершины графа соответствуют маркировкам, а рёбра соответствуют срабатываниям переходов. Вес ребра берётся из `transition.fire_time`.
 
+`include/petri/graph_models/star_forms.hpp` объявляет дополнительные представления графа:
+
+- `AdjacencyList`, `AdjacencyListRow`, `AdjacencyListEdge` — явный список смежности для обмена и сериализации;
+- `ForwardStarForm` — FSF с массивами `vertex_ids`, `row_offsets`, целевыми вершинами, индексами целей, id рёбер, метками и весами;
+- `BackwardStarForm` — BSF с теми же базовыми массивами, но сгруппированными по входящим рёбрам и исходным вершинам;
+- функции преобразования из `DirectedGraph` и `ReachabilityGraph`;
+- функции сериализации и десериализации adjacency list, FSF и BSF в JSON.
+
+`src/graph_models/star_forms.cpp` строит FSF по исходящим рёбрам в порядке вершин `DirectedGraph::vertex_ids()`, а BSF — по входящим рёбрам для каждой вершины. Десериализация проверяет базовую корректность JSON: наличие массивов, размеры `row_offsets`, монотонность смещений, равенство размеров массивов рёбер и соответствие строковых id вершин числовым индексам.
+
 ### Алгоритмы
 
 `include/petri/algorithms/algorithms.hpp` объявляет единый интерфейс алгоритмов:
@@ -257,6 +270,8 @@ petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 `tests/algorithms_tests.cpp` проверяет BFS, DFS, Dijkstra и ошибку неизвестного алгоритма.
 
 `tests/algorithm_selector_tests.cpp` проверяет взвешенный выбор BFS по длине пути, Dijkstra по стоимости пути, JSON-отчёт сравнения и строку ошибки для неизвестного алгоритма.
+
+`tests/graph_models_tests.cpp` проверяет преобразование графа достижимости в список смежности, FSF и BSF, а также сериализацию и десериализацию этих структур.
 
 `tests/integration_tests.cpp` проверяет совместную работу сети Петри, графа достижимости и алгоритмов.
 
@@ -1014,6 +1029,13 @@ build/Testing/Temporary/LastTest.log
 - формирование JSON-отчёта с таблицей сравнения;
 - сохранение ошибочного кандидата в отчёте при неизвестном имени алгоритма.
 
+`graph_models_tests.cpp` проверяет:
+
+- преобразование `ReachabilityGraph` в adjacency list;
+- преобразование `ReachabilityGraph` в FSF;
+- преобразование `ReachabilityGraph` в BSF;
+- JSON round-trip для adjacency list, FSF и BSF.
+
 `integration_tests.cpp` проверяет:
 
 - построение графа достижимости для `mutex.json`;
@@ -1039,7 +1061,6 @@ build/Testing/Temporary/LastTest.log
 
 - Python-биндинги через `pybind11`.
 - HTTP-сервис или отдельный серверный адаптер.
-- Отдельные представления FSF и BSF для графов.
 - Режим `structural_graph` в JSON API. Сейчас `algorithm_request()` принимает только `reachability_graph`.
 - Ингибиторные, цветные и стохастические сети Петри.
 - Хранение запусков или результатов в базе данных.
