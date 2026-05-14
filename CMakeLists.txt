@@ -59,6 +59,7 @@ add_executable(petri_tests
     tests/algorithms_tests.cpp
     tests/core_pn_tests.cpp
     tests/graph_models_tests.cpp
+    tests/integration_contract_tests.cpp
     tests/integration_tests.cpp
     tests/metrics_logger_tests.cpp
     tests/runtime_tests.cpp

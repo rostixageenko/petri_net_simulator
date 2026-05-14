@@ -75,6 +75,7 @@ petri_net_simulator/
     algorithms_tests.cpp
     core_pn_tests.cpp
     graph_models_tests.cpp
+    integration_contract_tests.cpp
     integration_tests.cpp
     metrics_logger_tests.cpp
     runtime_tests.cpp
@@ -84,6 +85,7 @@ petri_net_simulator/
     test_main.cpp
   docs/
     CODE_DOCUMENTATION.md
+    INTEGRATION_CONTRACT.md
   logs/
     .gitkeep
   build/
@@ -109,6 +111,8 @@ petri_net_simulator/
 `CMakeLists.txt` отвечает за сборку проекта. В нём задаётся стандарт C++20, создаётся библиотека `petri_core`, исполняемый файл `petri_cli`, тестовый исполняемый файл `petri_tests` и регистрируется тест `petri_tests` для CTest. Этот файл связывает все `.cpp`-файлы из `src/` с заголовками из `include/`.
 
 `API_CONTRACT.md` описывает JSON-форматы входной сети Петри, запроса симуляции, ответа симуляции, запроса алгоритма, ответа алгоритма и ошибок. Текущий код в `src/service_adapter/json_api.cpp` реализует именно этот тип обмена данными, но не все упомянутые в документе режимы уже поддержаны. Например, в коде поддержан только `graph_mode = "reachability_graph"`.
+
+`docs/INTEGRATION_CONTRACT.md` описывает библиотечный JSON-контракт для клиент-серверной части: какие запросы передавать в ядро через `handle_request()` или `handle_request_json()`, какие ответы возвращаются для симуляции, BFS, Dijkstra и ошибок, а также пример ответа с маршрутом, метриками и маркировками состояний.
 
 `README.md`, `PROJECT.md`, `PLAN.md` и `CODEX_INIT_PROMPT.md` содержат общее описание проекта, план и рабочий контекст. Эти файлы не участвуют в сборке программы.
 
@@ -308,6 +312,8 @@ petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 `tests/algorithm_selector_tests.cpp` проверяет взвешенный выбор BFS по длине пути, Dijkstra по стоимости пути, JSON-отчёт сравнения и строку ошибки для неизвестного алгоритма.
 
 `tests/graph_models_tests.cpp` проверяет преобразование графа достижимости в список смежности, FSF и BSF, а также сериализацию и десериализацию этих структур.
+
+`tests/integration_contract_tests.cpp` проверяет JSON-контракт библиотечного интеграционного слоя: форму ответа симуляции, ответы BFS и Dijkstra с маршрутом, метриками и маркировками состояний, строковый вход `handle_request_json()` и структурированную ошибку неизвестного алгоритма.
 
 `tests/integration_tests.cpp` проверяет совместную работу сети Петри, графа достижимости и алгоритмов.
 
@@ -1075,6 +1081,14 @@ build/Testing/Temporary/LastTest.log
 - преобразование `ReachabilityGraph` в FSF;
 - преобразование `ReachabilityGraph` в BSF;
 - JSON round-trip для adjacency list, FSF и BSF.
+
+`integration_contract_tests.cpp` проверяет:
+
+- контрактный JSON-запрос симуляции и форму ответа;
+- контрактные JSON-запросы BFS и Dijkstra;
+- наличие маршрута, метрик, графовых счётчиков и маркировок состояний в ответе алгоритма;
+- строковый вход `handle_request_json()`;
+- структурированную ошибку `UNKNOWN_ALGORITHM`.
 
 `integration_tests.cpp` проверяет:
 
