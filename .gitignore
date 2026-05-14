@@ -8,6 +8,8 @@ out/
 *.obj
 *.exe
 *.lib
+__pycache__/
+*.pyc
 logs/*.jsonl
 logs/*.csv
 !logs/.gitkeep

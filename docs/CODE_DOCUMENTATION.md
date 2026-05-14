@@ -17,6 +17,7 @@ petri_net_simulator/
   README.md
   examples/
     mutex.json
+    python_demo.py
   include/
     doctest/
       doctest.h
@@ -50,6 +51,8 @@ petri_net_simulator/
       algorithms.cpp
     algorithm_selector/
       algorithm_selector.cpp
+    bindings/
+      python_bindings.cpp
     cli/
       petri_cli.cpp
     core_pn/
@@ -77,6 +80,7 @@ petri_net_simulator/
     runtime_tests.cpp
     service_adapter_tests.cpp
     storage_api_tests.cpp
+    python_smoke_test.py
     test_main.cpp
   docs/
     CODE_DOCUMENTATION.md
@@ -270,6 +274,19 @@ petri_net_simulator/
 
 `src/storage_api/storage_api.cpp` реализует файловое хранилище без базы данных. Модели сохраняются в `data/models/<id>.json`, результаты запусков — в `data/runs/<run_id>.json`, метрики — в `data/metrics/<run_id>.jsonl`. При сохранении результата запуска в JSON добавляется поле `run_id`. Id нормализуются перед построением пути, чтобы файловый API не выходил за пределы своих папок.
 
+### Python-биндинги
+
+`src/bindings/python_bindings.cpp` реализует модуль `petri_core` через `pybind11`. Модуль экспортирует функции:
+
+- `load_petri_net_from_json(net)` — валидирует JSON модели и возвращает имя модели, начальную маркировку и разрешённые переходы;
+- `get_enabled_transitions(net, marking=None)` — возвращает список разрешённых переходов для начальной или переданной маркировки;
+- `fire_transition(net, transition_id, marking=None)` — срабатывает переход и возвращает новую маркировку;
+- `run_simulation(net, params=None)` — вызывает существующий JSON service adapter для режима `simulate`;
+- `run_algorithm(net, params=None)` — вызывает JSON service adapter для режима `algorithm`;
+- `select_algorithm(net, params=None)` — строит граф достижимости и запускает `algorithm_selector` для нескольких алгоритмов.
+
+CMake собирает Python-модуль только если найдены `Python3` development-файлы и CMake-пакет `pybind11`. Если зависимость отсутствует, C++ библиотека, CLI и C++ тесты продолжают собираться, а CMake выводит предупреждение. `tests/python_smoke_test.py` регистрируется в CTest только вместе с собранным Python-модулем.
+
 ### CLI
 
 `src/cli/petri_cli.cpp` содержит простое консольное приложение. Оно принимает путь к JSON-файлу сети Петри и необязательный режим:
@@ -301,6 +318,8 @@ petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 `tests/service_adapter_tests.cpp` проверяет JSON-ответы симуляции, JSON-ответы алгоритма и структурированную ошибку для некорректного запроса.
 
 `tests/storage_api_tests.cpp` проверяет сохранение и загрузку модели, сохранение и загрузку результата запуска с уникальным `run_id`, запись метрик в JSONL и ошибку пустого id модели.
+
+`tests/python_smoke_test.py` проверяет импорт Python-модуля `petri_core`, базовую загрузку сети, получение разрешённых переходов, срабатывание перехода, запуск симуляции, запуск алгоритма и выбор алгоритма. Этот smoke-test добавляется в CTest только когда CMake реально собрал Python-модуль.
 
 ## 3. Подробное описание кода
 
@@ -1084,11 +1103,17 @@ build/Testing/Temporary/LastTest.log
 - сохранение массива метрик несколькими строками JSONL;
 - ошибку `INVALID_STORAGE_ID` для пустого id модели.
 
+`python_smoke_test.py` проверяет:
+
+- импорт собранного модуля `petri_core`;
+- функции `load_petri_net_from_json()`, `get_enabled_transitions()` и `fire_transition()`;
+- `run_simulation()` и `run_algorithm()` через JSON-адаптер;
+- `select_algorithm()` через слой выбора алгоритма.
+
 ## 6. Что ещё не реализовано в текущем коде
 
 Эти части могут быть запланированы в общем проекте, но в текущем состоянии репозитория их исходного кода нет:
 
-- Python-биндинги через `pybind11`.
 - HTTP-сервис или отдельный серверный адаптер.
 - Режим `structural_graph` в JSON API. Сейчас `algorithm_request()` принимает только `reachability_graph`.
 - Ингибиторные, цветные и стохастические сети Петри.

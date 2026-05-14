@@ -88,11 +88,28 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-После появления Python-биндингов:
+## Сборка Python-модуля
+
+Python-биндинги собираются через `pybind11` в модуль `petri_core`. Если `pybind11` или development-файлы Python не найдены, CMake соберёт C++ ядро и тесты, но выведет предупреждение и пропустит Python-модуль.
 
 ```bash
-python -m pip install -e .
-python examples/run_mutex.py
+python -m pip install pybind11
+python -m pybind11 --cmakedir
+```
+
+Передайте путь из второй команды в `pybind11_DIR`:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPETRI_BUILD_PYTHON_BINDINGS=ON -Dpybind11_DIR="<path-from-python-m-pybind11-cmakedir>"
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+На Windows собранный модуль обычно лежит в `build/Debug`. Пример запуска:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path build\Debug).Path
+python examples/python_demo.py
 ```
 
 ## Первый запрос к Codex

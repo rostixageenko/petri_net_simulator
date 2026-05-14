@@ -5,6 +5,7 @@ project(petri_net_simulator VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+option(PETRI_BUILD_PYTHON_BINDINGS "Build Python module with pybind11" ON)
 
 add_library(petri_core
     src/algorithms/algorithms.cpp
@@ -24,6 +25,7 @@ target_include_directories(petri_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+set_target_properties(petri_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(MSVC)
     target_compile_options(petri_core PRIVATE /W4 /permissive- /FS)
@@ -33,6 +35,21 @@ endif()
 
 add_executable(petri_cli src/cli/petri_cli.cpp)
 target_link_libraries(petri_cli PRIVATE petri_core)
+
+if(PETRI_BUILD_PYTHON_BINDINGS)
+    find_package(Python3 COMPONENTS Interpreter Development.Module QUIET)
+    find_package(pybind11 CONFIG QUIET)
+    if(Python3_FOUND AND pybind11_FOUND)
+        pybind11_add_module(petri_core_python MODULE src/bindings/python_bindings.cpp)
+        set_target_properties(petri_core_python PROPERTIES OUTPUT_NAME petri_core)
+        target_link_libraries(petri_core_python PRIVATE petri_core)
+        if(MSVC)
+            target_compile_options(petri_core_python PRIVATE /W4 /permissive- /FS)
+        endif()
+    else()
+        message(WARNING "pybind11 or Python3 development files were not found; Python module petri_core will not be built")
+    endif()
+endif()
 
 enable_testing()
 
@@ -55,3 +72,11 @@ endif()
 
 add_test(NAME petri_tests COMMAND petri_tests)
 set_tests_properties(petri_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+if(TARGET petri_core_python AND Python3_Interpreter_FOUND)
+    add_test(
+        NAME python_bindings_smoke
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/python_smoke_test.py $<TARGET_FILE_DIR:petri_core_python>
+    )
+    set_tests_properties(python_bindings_smoke PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
