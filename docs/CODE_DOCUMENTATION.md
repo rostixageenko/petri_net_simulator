@@ -43,6 +43,8 @@ petri_net_simulator/
         algorithm_runtime.hpp
       service_adapter/
         json_api.hpp
+      storage_api/
+        storage_api.hpp
   src/
     algorithms/
       algorithms.cpp
@@ -63,6 +65,8 @@ petri_net_simulator/
       algorithm_runtime.cpp
     service_adapter/
       json_api.cpp
+    storage_api/
+      storage_api.cpp
   tests/
     algorithm_selector_tests.cpp
     algorithms_tests.cpp
@@ -72,6 +76,7 @@ petri_net_simulator/
     metrics_logger_tests.cpp
     runtime_tests.cpp
     service_adapter_tests.cpp
+    storage_api_tests.cpp
     test_main.cpp
   docs/
     CODE_DOCUMENTATION.md
@@ -251,6 +256,20 @@ petri_net_simulator/
 
 `src/service_adapter/json_api.cpp` реализует внешний JSON API. Он принимает JSON-запрос, достаёт из него сеть Петри, создаёт `PetriNet`, запускает симуляцию или алгоритм и формирует JSON-ответ. Адаптер не содержит HTTP-сервера и предназначен для вызова из C++-кода, будущих Python-биндингов или тонкого серверного слоя.
 
+### Файловое хранилище
+
+`include/petri/storage_api/storage_api.hpp` объявляет библиотечный API для сохранения JSON-артефактов проекта:
+
+- `StorageConfig` — корневая папка хранилища, по умолчанию `data`;
+- `StoredArtifact` — id сохранённого объекта и путь к файлу;
+- `models_directory()`, `runs_directory()` и `metrics_directory()` возвращают папки `data/models`, `data/runs` и `data/metrics`;
+- `generate_run_id()` создаёт уникальный id запуска;
+- `save_model()` и `load_model()` сохраняют и загружают JSON модели сети Петри;
+- `save_run_result()` и `load_run_result()` сохраняют и загружают JSON результата запуска;
+- `save_metrics()` сохраняет метрики в JSONL-файл по id запуска.
+
+`src/storage_api/storage_api.cpp` реализует файловое хранилище без базы данных. Модели сохраняются в `data/models/<id>.json`, результаты запусков — в `data/runs/<run_id>.json`, метрики — в `data/metrics/<run_id>.jsonl`. При сохранении результата запуска в JSON добавляется поле `run_id`. Id нормализуются перед построением пути, чтобы файловый API не выходил за пределы своих папок.
+
 ### CLI
 
 `src/cli/petri_cli.cpp` содержит простое консольное приложение. Оно принимает путь к JSON-файлу сети Петри и необязательный режим:
@@ -280,6 +299,8 @@ petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 `tests/runtime_tests.cpp` проверяет список встроенных алгоритмов в runtime, запуск через `AlgorithmTask`, регистрацию функционального алгоритма в `AlgorithmRegistry`, ошибку `UNKNOWN_ALGORITHM` и запись метрик runtime.
 
 `tests/service_adapter_tests.cpp` проверяет JSON-ответы симуляции, JSON-ответы алгоритма и структурированную ошибку для некорректного запроса.
+
+`tests/storage_api_tests.cpp` проверяет сохранение и загрузку модели, сохранение и загрузку результата запуска с уникальным `run_id`, запись метрик в JSONL и ошибку пустого id модели.
 
 ## 3. Подробное описание кода
 
@@ -1054,6 +1075,14 @@ build/Testing/Temporary/LastTest.log
 - ошибку недостижимой цели;
 - ошибку превышения лимита состояний;
 - строковый вход `handle_request_json()` для некорректного JSON.
+
+`storage_api_tests.cpp` проверяет:
+
+- сохранение и загрузку JSON-модели сети Петри;
+- сохранение и загрузку JSON-результата запуска с уникальным `run_id`;
+- сохранение одной записи метрик в JSONL;
+- сохранение массива метрик несколькими строками JSONL;
+- ошибку `INVALID_STORAGE_ID` для пустого id модели.
 
 ## 6. Что ещё не реализовано в текущем коде
 

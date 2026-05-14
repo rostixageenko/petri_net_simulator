@@ -17,6 +17,7 @@ add_library(petri_core
     src/logging_metrics/metrics_logger.cpp
     src/runtime/algorithm_runtime.cpp
     src/service_adapter/json_api.cpp
+    src/storage_api/storage_api.cpp
 )
 
 target_include_directories(petri_core
@@ -45,6 +46,7 @@ add_executable(petri_tests
     tests/metrics_logger_tests.cpp
     tests/runtime_tests.cpp
     tests/service_adapter_tests.cpp
+    tests/storage_api_tests.cpp
 )
 target_link_libraries(petri_tests PRIVATE petri_core)
 if(MSVC)

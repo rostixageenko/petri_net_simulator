@@ -11,3 +11,8 @@ out/
 logs/*.jsonl
 logs/*.csv
 !logs/.gitkeep
+data/models/*.json
+data/runs/*.json
+data/metrics/*.json
+data/metrics/*.jsonl
+data/test_storage_api/
