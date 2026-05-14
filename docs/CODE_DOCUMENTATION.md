@@ -185,15 +185,16 @@ petri_net_simulator/
 
 ### JSON-адаптер
 
-`include/petri/service_adapter/json_api.hpp` объявляет функции:
+`include/petri/service_adapter/json_api.hpp` объявляет класс и функции:
 
+- `JsonServiceAdapter` — статeless-класс библиотечного адаптера с методами `handle()` и `handle_json()`;
 - `error_response()`;
 - `simulate_request()`;
 - `algorithm_request()`;
 - `handle_request()`;
 - `handle_request_json()`.
 
-`src/service_adapter/json_api.cpp` реализует внешний JSON API. Он принимает JSON-запрос, достаёт из него сеть Петри, создаёт `PetriNet`, запускает симуляцию или алгоритм и формирует JSON-ответ.
+`src/service_adapter/json_api.cpp` реализует внешний JSON API. Он принимает JSON-запрос, достаёт из него сеть Петри, создаёт `PetriNet`, запускает симуляцию или алгоритм и формирует JSON-ответ. Адаптер не содержит HTTP-сервера и предназначен для вызова из C++-кода, будущих Python-биндингов или тонкого серверного слоя.
 
 ### CLI
 
@@ -344,7 +345,7 @@ petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 - `place_index(id)` возвращает индекс места или `std::nullopt`.
 - `transition_index(id)` возвращает индекс перехода или `std::nullopt`.
 - `transition_fire_time(transition_id)` возвращает `fire_time` перехода. Если id неизвестен, метод возвращает `1.0`.
-- `marking_matches(marking, partial_marking)` проверяет, подходит ли маркировка под частичный JSON-образец.
+- `marking_matches(marking, partial_marking)` проверяет, подходит ли маркировка под частичный JSON-образец. Образец должен содержать хотя бы одно известное место; неизвестные id мест не считаются совпадением.
 
 `from_json()` выполняет основную валидацию входной сети:
 
@@ -595,17 +596,22 @@ UNKNOWN_ALGORITHM
 
 Публичные функции:
 
+- `JsonServiceAdapter::handle(request)` принимает объект JSON, выбирает режим и возвращает JSON-ответ;
+- `JsonServiceAdapter::handle_json(request_json)` принимает строку JSON и возвращает строку JSON-ответа;
 - `error_response(request_id, error)` создаёт JSON-ответ со статусом `error`;
 - `simulate_request(request)` обрабатывает запрос с `mode = "simulate"`;
 - `algorithm_request(request)` обрабатывает запрос с `mode = "algorithm"`;
-- `handle_request(request)` выбирает обработчик по полю `mode`;
-- `handle_request_json(request_json)` принимает строку JSON, парсит её, вызывает `handle_request()` и возвращает строку JSON.
+- `handle_request(request)` — совместимый фасад, который вызывает `JsonServiceAdapter::handle()`;
+- `handle_request_json(request_json)` — совместимый фасад, который вызывает `JsonServiceAdapter::handle_json()`.
 
 Внутренние вспомогательные функции:
 
 - `request_id_from()` достаёт `request_id`, если он есть;
 - `event_to_json()` преобразует `SimulationEvent` в JSON;
 - `algorithm_metrics_to_json()` преобразует `AlgorithmMetrics` в JSON;
+- `params_from_request()` проверяет, что `params` отсутствует или является объектом;
+- `read_size_t_field()`, `read_bool_field()`, `read_string_field()` и `read_optional_string_field()` проверяют типы параметров до запуска ядра;
+- `validate_target_marking()` проверяет, что `target_marking` является непустым объектом, ссылается только на существующие места и содержит неотрицательные целые значения токенов;
 - `path_to_json()` преобразует путь по вершинам графа достижимости в массив JSON с маркировками и переходами;
 - `net_from_request()` проверяет наличие поля `net` и вызывает `PetriNet::from_json()`.
 
@@ -613,7 +619,7 @@ UNKNOWN_ALGORITHM
 
 1. Получает `request_id`.
 2. Загружает сеть через `net_from_request()`.
-3. Читает параметры `max_steps`, `strategy`, `stop_on_deadlock`, `return_events`, `transition_id`.
+3. Проверяет объект `params` и читает параметры `max_steps`, `strategy`, `stop_on_deadlock`, `return_events`, `transition_id`.
 4. Создаёт `Interpreter`.
 5. Вызывает `Interpreter::run()`.
 6. Возвращает JSON с начальными и финальными маркировками, событиями и метриками.
@@ -622,17 +628,21 @@ UNKNOWN_ALGORITHM
 
 1. Получает `request_id`.
 2. Загружает сеть через `net_from_request()`.
-3. Читает параметры `graph_mode`, `algorithm`, `max_states`, `max_depth`, `source`, `target`, `target_marking`.
+3. Проверяет объект `params` и читает параметры `graph_mode`, `algorithm`, `max_states`, `max_depth`, `source`, `target`, `target_marking`.
 4. Проверяет, что `graph_mode` равен `reachability_graph`. Другие режимы сейчас не поддержаны.
-5. Строит граф достижимости через `build_reachability_graph()`.
-6. Определяет начальную вершину. Значение `source = "initial"` заменяется на `reachability.initial_vertex_id`.
-7. Если задан `target_marking`, ищет целевую вершину через `find_marking_vertex()`.
-8. Запускает алгоритм через `run_algorithm()`.
-9. Возвращает JSON с путём, метриками и количеством вершин и рёбер графа.
+5. Если задан `target_marking`, проверяет id мест и типы значений.
+6. Строит граф достижимости через `build_reachability_graph()`.
+7. Определяет начальную вершину. Значение `source = "initial"` заменяется на `reachability.initial_vertex_id`.
+8. Если задан `target_marking`, ищет целевую вершину через `find_marking_vertex()`.
+9. Запускает алгоритм через `run_algorithm()`.
+10. Если алгоритм не нашёл путь к заданной цели, возвращает ошибку `TARGET_NOT_FOUND`.
+11. Возвращает JSON с путём, метриками и количеством вершин и рёбер графа.
 
-`handle_request()` требует строковое поле `mode`. Значение `simulate` направляет запрос в `simulate_request()`, значение `algorithm` — в `algorithm_request()`. Остальные значения возвращают ошибку.
+`JsonServiceAdapter::handle()` требует строковое поле `mode`. Значение `simulate` направляет запрос в `simulate_request()`, значение `algorithm` — в `algorithm_request()`. Остальные значения возвращают ошибку. Функция `handle_request()` оставлена как совместимый свободный фасад.
 
-`handle_request_json()` нужен для интеграции через строковый JSON: он парсит входную строку и возвращает красиво отформатированный JSON с отступом 2 пробела.
+`JsonServiceAdapter::handle_json()` нужен для интеграции через строковый JSON: он парсит входную строку и возвращает красиво отформатированный JSON с отступом 2 пробела. Функция `handle_request_json()` оставлена как совместимый свободный фасад.
+
+Все публичные входы JSON-адаптера перехватывают исключения парсинга и ошибок доступа к JSON и возвращают структурированный ответ `status = "error"`. Для некорректной сети возвращается код из слоя `PetriNet`, для неизвестного алгоритма — `UNKNOWN_ALGORITHM`, для превышения лимита графа достижимости — `STATE_LIMIT_EXCEEDED`, для недостижимой цели — `TARGET_NOT_FOUND`.
 
 Роль файлов: это слой интеграции между внешним JSON-контрактом и внутренними C++-модулями.
 
@@ -917,7 +927,13 @@ build/Testing/Temporary/LastTest.log
 
 - JSON-ответ симуляции;
 - JSON-ответ алгоритма;
-- структурированную JSON-ошибку.
+- JSON-ответ Dijkstra с метрикой стоимости пути;
+- ошибку некорректных параметров симуляции;
+- ошибку некорректной сети;
+- ошибку неизвестного алгоритма;
+- ошибку недостижимой цели;
+- ошибку превышения лимита состояний;
+- строковый вход `handle_request_json()` для некорректного JSON.
 
 ## 6. Что ещё не реализовано в текущем коде
 

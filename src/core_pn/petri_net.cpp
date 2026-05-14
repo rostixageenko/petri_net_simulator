@@ -64,7 +64,14 @@ Result<PetriNet> PetriNet::from_json(const nlohmann::json& data) {
     }
 
     PetriNet net;
-    net.name_ = data.value<std::string>("name", "Petri net");
+    net.name_ = "Petri net";
+    if (data.contains("name")) {
+        if (!data.at("name").is_string()) {
+            return Result<PetriNet>::failure(
+                make_error("INVALID_JSON", "Field 'name' must be a string", {{"field", "name"}}));
+        }
+        net.name_ = data.at("name").get<std::string>();
+    }
 
     std::set<std::string> place_ids;
     for (const auto& place_json : data.at("places")) {
@@ -326,10 +333,12 @@ bool PetriNet::marking_matches(const Marking& marking, const nlohmann::json& par
         return false;
     }
 
+    std::size_t matched_fields = 0;
     for (const auto& place : places_) {
         if (!partial_marking.contains(place.id)) {
             continue;
         }
+        ++matched_fields;
         const auto index = place_index(place.id);
         if (!index || !partial_marking.at(place.id).is_number_integer()) {
             return false;
@@ -338,7 +347,7 @@ bool PetriNet::marking_matches(const Marking& marking, const nlohmann::json& par
             return false;
         }
     }
-    return true;
+    return matched_fields > 0 && matched_fields == partial_marking.size();
 }
 
 } // namespace petri

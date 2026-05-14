@@ -101,7 +101,7 @@ Result<AlgorithmResult> run_bfs(const DirectedGraph& graph, const AlgorithmParam
     queue.push(params.source_vertex_id);
     visited.insert(params.source_vertex_id);
 
-    bool target_found = !params.target_vertex_id || params.source_vertex_id == *params.target_vertex_id;
+    bool target_found = params.target_vertex_id && params.source_vertex_id == *params.target_vertex_id;
     while (!queue.empty() && !target_found) {
         const std::string current = queue.front();
         queue.pop();
@@ -121,6 +121,9 @@ Result<AlgorithmResult> run_bfs(const DirectedGraph& graph, const AlgorithmParam
         }
     }
 
+    if (!params.target_vertex_id) {
+        target_found = true;
+    }
     if (target_found && params.target_vertex_id) {
         traversal_order.push_back(*params.target_vertex_id);
     }

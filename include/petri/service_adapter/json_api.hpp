@@ -11,6 +11,12 @@
 
 namespace petri {
 
+class JsonServiceAdapter {
+public:
+    nlohmann::json handle(const nlohmann::json& request) const;
+    std::string handle_json(const std::string& request_json) const;
+};
+
 nlohmann::json error_response(const std::string& request_id, const Error& error);
 nlohmann::json simulate_request(const nlohmann::json& request);
 nlohmann::json algorithm_request(const nlohmann::json& request);
