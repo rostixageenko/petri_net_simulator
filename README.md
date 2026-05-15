@@ -114,6 +114,31 @@ $env:PYTHONPATH = (Resolve-Path build\Debug).Path
 python examples/python_demo.py
 ```
 
+## Быстрый запуск и демонстрация
+
+Минимальная проверка C++-ядра без Python-биндингов:
+
+```powershell
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPETRI_BUILD_PYTHON_BINDINGS=OFF
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+Демонстрационный запуск:
+
+```powershell
+.\build\Debug\demo_runner.exe examples\simple_chain.json
+.\build\Debug\demo_runner.exe examples\mutex.json
+```
+
+Отдельный JSON-ответ алгоритма:
+
+```powershell
+.\build\Debug\petri_cli.exe examples\mutex.json bfs
+```
+
+Подробный сценарий для защиты находится в `docs/DEMO_AND_TESTING_GUIDE.md`.
+
 ## Примеры запуска
 
 CLI-симуляция:
@@ -183,3 +208,4 @@ cmake -S . -B out\fresh-build -DCMAKE_BUILD_TYPE=Debug
 cmake --build out\fresh-build --config Debug
 ctest --test-dir out\fresh-build -C Debug --output-on-failure
 ```
+

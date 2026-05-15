@@ -1,0 +1,14 @@
+{
+  "name": "Simple chain: start to done",
+  "places": [
+    {"id": "p_start", "label": "Start", "tokens": 1},
+    {"id": "p_done", "label": "Done", "tokens": 0}
+  ],
+  "transitions": [
+    {"id": "t_finish", "label": "Finish", "fire_time": 0.5}
+  ],
+  "arcs": [
+    {"id": "a1", "source": "p_start", "target": "t_finish", "weight": 1},
+    {"id": "a2", "source": "t_finish", "target": "p_done", "weight": 1}
+  ]
+}

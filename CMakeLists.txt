@@ -36,6 +36,9 @@ endif()
 add_executable(petri_cli src/cli/petri_cli.cpp)
 target_link_libraries(petri_cli PRIVATE petri_core)
 
+add_executable(demo_runner examples/demo_runner.cpp)
+target_link_libraries(demo_runner PRIVATE petri_core)
+
 if(PETRI_BUILD_PYTHON_BINDINGS)
     find_package(Python3 COMPONENTS Interpreter Development.Module QUIET)
     find_package(pybind11 CONFIG QUIET)
