@@ -41,10 +41,16 @@ target_link_libraries(demo_runner PRIVATE petri_core)
 
 if(PETRI_BUILD_PYTHON_BINDINGS)
     find_package(Python3 COMPONENTS Interpreter Development.Module QUIET)
+    set(PYBIND11_FINDPYTHON ON)
     find_package(pybind11 CONFIG QUIET)
     if(Python3_FOUND AND pybind11_FOUND)
+        message(STATUS "Python bindings enabled: Python ${Python3_VERSION} at ${Python3_EXECUTABLE}")
+        message(STATUS "Python bindings enabled: pybind11 ${pybind11_VERSION}")
         pybind11_add_module(petri_core_python MODULE src/bindings/python_bindings.cpp)
-        set_target_properties(petri_core_python PROPERTIES OUTPUT_NAME petri_core)
+        set_target_properties(petri_core_python PROPERTIES
+            OUTPUT_NAME petri_core
+            ARCHIVE_OUTPUT_NAME petri_core_python
+        )
         target_link_libraries(petri_core_python PRIVATE petri_core)
         if(MSVC)
             target_compile_options(petri_core_python PRIVATE /W4 /permissive- /FS)
@@ -78,6 +84,12 @@ add_test(NAME petri_tests COMMAND petri_tests)
 set_tests_properties(petri_tests PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(TARGET petri_core_python AND Python3_Interpreter_FOUND)
+    add_test(
+        NAME python_bindings_import
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/python_import_smoke_test.py $<TARGET_FILE_DIR:petri_core_python>
+    )
+    set_tests_properties(python_bindings_import PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
     add_test(
         NAME python_bindings_smoke
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/python_smoke_test.py $<TARGET_FILE_DIR:petri_core_python>

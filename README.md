@@ -92,25 +92,40 @@ ctest --test-dir build -C Debug --output-on-failure
 
 ## Сборка Python-модуля
 
-Python-биндинги собираются в модуль `petri_core`.
+Python-биндинги собираются в модуль `petri_core`. На Windows важно использовать один и тот же `python.exe` для установки `pybind11`, конфигурации CMake и запуска smoke-тестов.
 
-```bash
+Если `python` доступен в `PATH`, используйте:
+
+```powershell
+python --version
 python -m pip install pybind11
-python -m pybind11 --cmakedir
-```
+$pybind11Dir = python -m pybind11 --cmakedir
+$pythonExe = (Get-Command python).Source
 
-Передайте путь из второй команды в `pybind11_DIR`:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPETRI_BUILD_PYTHON_BINDINGS=ON -Dpybind11_DIR="<path-from-python-m-pybind11-cmakedir>"
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPETRI_BUILD_PYTHON_BINDINGS=ON -DPython3_EXECUTABLE="$pythonExe" -Dpybind11_DIR="$pybind11Dir"
 cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-На Windows собранный модуль обычно лежит в `build/Debug`:
+Если `python` или `cmake` не добавлены в `PATH`, передайте абсолютные пути:
 
 ```powershell
+$pythonExe = "C:\Path\To\Python\python.exe"
+& $pythonExe -m pip install pybind11
+$pybind11Dir = & $pythonExe -m pybind11 --cmakedir
+
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPETRI_BUILD_PYTHON_BINDINGS=ON -DPython3_EXECUTABLE="$pythonExe" -Dpybind11_DIR="$pybind11Dir"
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" --build build --config Debug
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe" --test-dir build -C Debug --output-on-failure
+```
+
+При успешной конфигурации CMake выводит строки `Python bindings enabled` с найденными версиями Python и `pybind11`. На Windows собранный модуль обычно лежит в `build\Debug`; проверить его можно так:
+
+```powershell
+Get-ChildItem build -Recurse -Filter "petri_core*.pyd"
 $env:PYTHONPATH = (Resolve-Path build\Debug).Path
+python tests/python_import_smoke_test.py build\Debug
+python tests/python_smoke_test.py build\Debug
 python examples/python_demo.py
 ```
 
