@@ -1,10 +1,32 @@
 # Документация к коду
 
-Документ описывает текущее состояние репозитория `petri_net_simulator`. Здесь перечислены только те модули, файлы, классы и функции, которые уже есть в коде. Запланированные, но отсутствующие части вынесены в конец отдельным списком.
+Этот документ описывает текущее состояние репозитория `petri_net_simulator`. Описание основано на реально существующих файлах, классах, структурах и функциях проекта. Возможности, которых нет в коде, вынесены в раздел ограничений и не описываются как готовые.
 
-## 1. Структура проекта
+## 1. Общая цель проекта
 
-В корне проекта находятся файлы управления сборкой, описание JSON-контракта, исходный код C++-ядра, пример входной сети Петри и тесты.
+Проект реализует C++20-ядро автоматизированной подсистемы моделирования и интерпретации сетей Петри.
+
+Ядро принимает описание сети Петри в JSON, проверяет корректность модели, строит внутреннее представление `PetriNet`, выполняет пошаговую симуляцию, строит ограниченный граф достижимости маркировок и запускает графовые алгоритмы DFS, BFS и Dijkstra. Результаты возвращаются в JSON-формате, удобном для визуализации, Python-интеграции и будущего серверного слоя.
+
+В текущем коде уже есть:
+
+- модель сети Петри;
+- валидация JSON-модели;
+- интерпретатор пошагового выполнения;
+- построение ограниченного графа достижимости;
+- графовые представления `DirectedGraph`, adjacency list, FSF и BSF;
+- алгоритмы DFS, BFS и Dijkstra;
+- runtime-реестр алгоритмов;
+- простой выборщик алгоритма по метрикам;
+- JSON service adapter без HTTP-сервера;
+- логирование метрик в JSONL;
+- файловый `storage_api` для моделей, результатов запусков и метрик;
+- опциональные Python bindings через `pybind11`;
+- CLI-пример и набор тестов.
+
+## 2. Структура проекта
+
+Текущая структура исходников выглядит так:
 
 ```text
 petri_net_simulator/
@@ -15,6 +37,10 @@ petri_net_simulator/
   PLAN.md
   PROJECT.md
   README.md
+  docs/
+    CODE_DOCUMENTATION.md
+    GITHUB_AND_CODEX_SETUP.md
+    INTEGRATION_CONTRACT.md
   examples/
     mutex.json
     python_demo.py
@@ -46,6 +72,8 @@ petri_net_simulator/
         json_api.hpp
       storage_api/
         storage_api.hpp
+  logs/
+    .gitkeep
   src/
     algorithms/
       algorithms.cpp
@@ -78,943 +106,905 @@ petri_net_simulator/
     integration_contract_tests.cpp
     integration_tests.cpp
     metrics_logger_tests.cpp
+    python_smoke_test.py
     runtime_tests.cpp
     service_adapter_tests.cpp
     storage_api_tests.cpp
-    python_smoke_test.py
     test_main.cpp
-  docs/
-    CODE_DOCUMENTATION.md
-    INTEGRATION_CONTRACT.md
-  logs/
-    .gitkeep
-  build/
 ```
 
-Папка `build/` уже присутствует в рабочем каталоге, но это не исходный код. Она создаётся CMake и содержит сгенерированные файлы Visual Studio, собранные исполняемые файлы, библиотеку и логи тестов.
+Папка `build/` может существовать после запуска CMake. Это сгенерированная папка сборки, а не исходный код. В ней находятся файлы Visual Studio, библиотека `petri_core.lib`, исполняемые файлы `petri_cli.exe`, `petri_tests.exe`, а при успешной сборке Python bindings - модуль `petri_core`.
 
-Основные папки проекта:
+### Основные папки
 
-- `include/petri/` содержит публичные заголовочные файлы проекта. В них объявлены структуры данных, классы и функции.
-- `src/` содержит реализации функций и методов, объявленных в `include/petri/`.
-- `tests/` содержит тесты на `doctest`.
-- `examples/` содержит пример JSON-описания сети Петри.
-- `docs/` содержит документацию к проекту.
-- `logs/` содержит файл `.gitkeep` и используется для JSONL-журнала метрик запусков. Сами `.jsonl` и `.csv` файлы игнорируются Git.
-- `include/nlohmann/json.hpp` содержит подключённую header-only библиотеку для работы с JSON.
-- `include/doctest/doctest.h` содержит подключённый header-only фреймворк тестирования.
+`include/` содержит публичные заголовочные файлы. В них объявлены классы, структуры и функции, которые используются между модулями.
 
-## 2. Назначение основных файлов
+`src/` содержит реализации C++-кода из заголовочных файлов.
 
-### Файлы в корне проекта
+`tests/` содержит тесты на `doctest` и Python smoke test для опционального модуля `petri_core`.
 
-`CMakeLists.txt` отвечает за сборку проекта. В нём задаётся стандарт C++20, создаётся библиотека `petri_core`, исполняемый файл `petri_cli`, тестовый исполняемый файл `petri_tests` и регистрируется тест `petri_tests` для CTest. Этот файл связывает все `.cpp`-файлы из `src/` с заголовками из `include/`.
+`examples/` содержит демонстрационные входные данные и Python-пример.
 
-`API_CONTRACT.md` описывает JSON-форматы входной сети Петри, запроса симуляции, ответа симуляции, запроса алгоритма, ответа алгоритма и ошибок. Текущий код в `src/service_adapter/json_api.cpp` реализует именно этот тип обмена данными, но не все упомянутые в документе режимы уже поддержаны. Например, в коде поддержан только `graph_mode = "reachability_graph"`.
+`docs/` содержит документацию и интеграционные контракты.
 
-`docs/INTEGRATION_CONTRACT.md` описывает библиотечный JSON-контракт для клиент-серверной части: какие запросы передавать в ядро через `handle_request()` или `handle_request_json()`, какие ответы возвращаются для симуляции, BFS, Dijkstra и ошибок, а также пример ответа с маршрутом, метриками и маркировками состояний.
+`logs/` содержит `.gitkeep`, чтобы папка логов существовала в репозитории. По умолчанию метрики пишутся в `logs/metrics.jsonl`.
 
-`README.md`, `PROJECT.md`, `PLAN.md` и `CODEX_INIT_PROMPT.md` содержат общее описание проекта, план и рабочий контекст. Эти файлы не участвуют в сборке программы.
+### Важные файлы в корне
 
-`AGENTS.md` содержит инструкции для Codex по работе с проектом. В сборке и выполнении программы он не участвует.
+`CMakeLists.txt` управляет сборкой. Он создаёт библиотеку `petri_core`, CLI-приложение `petri_cli`, тестовый бинарник `petri_tests` и, если найдены Python3 development files и `pybind11`, Python-модуль `petri_core`.
 
-### Пример входных данных
+`README.md` описывает проект, реализованные модули, команды сборки и ограничения. Это справочный файл, он не участвует в компиляции.
 
-`examples/mutex.json` содержит пример сети Петри для задачи взаимного исключения двух процессов. В файле есть:
+`API_CONTRACT.md` описывает JSON-контракт запросов и ответов.
 
-- 7 мест: состояния первого процесса, состояния второго процесса и место `mutex`;
-- 6 переходов: запрос, вход в критическую секцию и выход для каждого процесса;
-- 16 дуг между местами и переходами.
+`PROJECT.md`, `PLAN.md`, `CODEX_INIT_PROMPT.md`, `AGENTS.md` содержат проектный контекст, план и рабочие инструкции. Они полезны для понимания дипломной задачи, но не подключаются к коду.
 
-Этот файл используется в тестах `tests/core_pn_tests.cpp`, `tests/integration_tests.cpp`, `tests/service_adapter_tests.cpp` и в CLI-приложении.
+## 3. Описание каждого основного файла
 
-### Общие типы результата
+### `include/petri/common/result.hpp`
 
-`include/petri/common/result.hpp` объявляет:
+Файл нужен для единого способа возвращать либо успешный результат, либо ошибку.
 
-- `Error` — структуру ошибки с кодом, сообщением и дополнительными деталями;
-- `Result<T>` — контейнер результата операции, который хранит либо значение типа `T`, либо ошибку;
-- `Result<void>` — специальную версию результата для операций без возвращаемого значения;
-- `make_error()` — вспомогательную функцию для создания `Error`.
+Содержит:
 
-Этот файл используется почти всеми основными модулями: моделью сети Петри, интерпретатором, графом достижимости, алгоритмами, runtime и JSON-адаптером.
+- `struct Error`;
+- шаблон `Result<T>`;
+- специализацию `Result<void>`;
+- функцию `make_error()`.
 
-### Модель сети Петри
+`Error` принимает код ошибки, сообщение и карту дополнительных деталей. `Result<T>` возвращает значение типа `T` или ошибку. Этот файл используется почти всеми модулями, потому что ошибки в проекте передаются через `Result`, а не через разные несовместимые механизмы.
 
-`include/petri/core_pn/model.hpp` объявляет простые структуры предметной области:
+### `include/petri/core_pn/model.hpp`
 
-- `Place` — место сети Петри;
-- `Transition` — переход;
-- `ArcDirection` — направление дуги;
-- `Arc` — дуга;
-- `Marking` — маркировка, то есть набор токенов по местам;
-- `SimulationEvent` — событие одного шага симуляции.
+Файл объявляет базовые типы сети Петри.
 
-Этот файл подключается в `petri_net.hpp`, `interpreter.hpp` и `reachability.hpp`.
+Содержит:
 
-`include/petri/core_pn/petri_net.hpp` объявляет класс `PetriNet`. Он хранит места, переходы, дуги, индексы по id, входные дуги переходов и выходные дуги переходов. Через этот класс выполняется загрузка JSON, валидация сети, получение начальной маркировки, проверка разрешённых переходов и срабатывание переходов.
+- `Place`;
+- `Transition`;
+- `ArcDirection`;
+- `Arc`;
+- `Marking`;
+- `SimulationEvent`.
 
-`src/core_pn/petri_net.cpp` реализует методы класса `PetriNet`. Именно здесь проверяются обязательные поля JSON, уникальность id, корректность количества токенов, корректность веса дуги, существование концов дуги и запрет дуг вида `place -> place` и `transition -> transition`.
+Эти типы используются в `PetriNet`, `Interpreter`, графе достижимости и JSON-ответах.
 
-### Интерпретатор
+### `include/petri/core_pn/petri_net.hpp` и `src/core_pn/petri_net.cpp`
 
-`include/petri/core_pn/interpreter.hpp` объявляет:
+Эти файлы описывают и реализуют класс `PetriNet`.
 
-- `SimulationStrategy` — стратегию выбора перехода;
-- `SimulationParams` — параметры запуска симуляции;
-- `SimulationRun` — результат серии шагов;
-- `parse_strategy()` и `strategy_to_string()`;
+`PetriNet` нужен для хранения сети Петри и правил её выполнения. Он принимает JSON, валидирует места, переходы и дуги, строит внутренние индексы, определяет разрешённые переходы и выполняет срабатывание перехода.
+
+Основные данные:
+
+- имя сети;
+- список мест;
+- список переходов;
+- список дуг;
+- индекс места по id;
+- индекс перехода по id;
+- входные дуги каждого перехода;
+- выходные дуги каждого перехода.
+
+Файл взаимодействует с `model.hpp`, `result.hpp`, `nlohmann/json.hpp`, `interpreter.cpp`, `reachability.cpp`, `json_api.cpp`, Python bindings и тестами.
+
+### `include/petri/core_pn/interpreter.hpp` и `src/core_pn/interpreter.cpp`
+
+Эти файлы реализуют интерпретатор сети Петри.
+
+Содержат:
+
+- `SimulationStrategy`;
+- `SimulationParams`;
+- `SimulationRun`;
+- `parse_strategy()`;
+- `strategy_to_string()`;
 - класс `Interpreter`.
 
-`src/core_pn/interpreter.cpp` реализует пошаговую интерпретацию. Интерпретатор хранит текущую маркировку, номер шага, текущее модельное время и курсор для стратегии `round_robin`. Для изменения маркировки он использует методы `PetriNet`.
+Интерпретатор принимает `PetriNet` и текущую маркировку, выбирает разрешённый переход по стратегии, выполняет шаг через `PetriNet::fire_transition()` и формирует `SimulationEvent`. Для серии шагов используется `Interpreter::run()`.
 
-### Графовые модели
+### `include/petri/graph_models/directed_graph.hpp` и `src/graph_models/directed_graph.cpp`
 
-`include/petri/graph_models/directed_graph.hpp` объявляет:
+Файлы реализуют простой ориентированный граф.
 
-- `GraphEdge` — ориентированное ребро графа;
-- `DirectedGraph` — ориентированный граф на списках смежности.
+Содержат:
 
-`src/graph_models/directed_graph.cpp` реализует добавление вершин, добавление рёбер, проверку существования вершины, получение исходящих рёбер и поиск ребра между двумя вершинами.
+- `GraphEdge`;
+- `DirectedGraph`.
 
-`include/petri/graph_models/reachability.hpp` объявляет:
+`DirectedGraph` хранит вершины и списки исходящих рёбер. Он используется алгоритмами DFS, BFS, Dijkstra, графом достижимости и графовыми формами FSF/BSF.
 
-- `ReachabilityOptions` — ограничения построения графа достижимости;
-- `ReachabilityGraph` — граф достижимости вместе с маркировками вершин и глубинами;
-- `build_reachability_graph()` — построение ограниченного графа достижимости;
-- `find_marking_vertex()` — поиск вершины по частичной маркировке;
-- `reachability_graph_to_json()` — сериализацию графа достижимости в JSON.
+### `include/petri/graph_models/reachability.hpp` и `src/graph_models/reachability.cpp`
 
-`src/graph_models/reachability.cpp` реализует построение графа достижимости. Вершины графа соответствуют маркировкам, а рёбра соответствуют срабатываниям переходов. Вес ребра берётся из `transition.fire_time`.
+Файлы строят граф достижимости маркировок сети Петри.
 
-`include/petri/graph_models/star_forms.hpp` объявляет дополнительные представления графа:
+Содержат:
 
-- `AdjacencyList`, `AdjacencyListRow`, `AdjacencyListEdge` — явный список смежности для обмена и сериализации;
-- `ForwardStarForm` — FSF с массивами `vertex_ids`, `row_offsets`, целевыми вершинами, индексами целей, id рёбер, метками и весами;
-- `BackwardStarForm` — BSF с теми же базовыми массивами, но сгруппированными по входящим рёбрам и исходным вершинам;
-- функции преобразования из `DirectedGraph` и `ReachabilityGraph`;
-- функции сериализации и десериализации adjacency list, FSF и BSF в JSON.
+- `ReachabilityOptions`;
+- `ReachabilityGraph`;
+- `build_reachability_graph()`;
+- `find_marking_vertex()`;
+- `reachability_graph_to_json()`.
 
-`src/graph_models/star_forms.cpp` строит FSF по исходящим рёбрам в порядке вершин `DirectedGraph::vertex_ids()`, а BSF — по входящим рёбрам для каждой вершины. Десериализация проверяет базовую корректность JSON: наличие массивов, размеры `row_offsets`, монотонность смещений, равенство размеров массивов рёбер и соответствие строковых id вершин числовым индексам.
+Граф достижимости строится из `PetriNet`: вершины соответствуют маркировкам, рёбра соответствуют срабатываниям переходов, вес ребра равен `transition.fire_time`.
 
-### Алгоритмы
+### `include/petri/graph_models/star_forms.hpp` и `src/graph_models/star_forms.cpp`
 
-`include/petri/algorithms/algorithms.hpp` объявляет единый интерфейс алгоритмов:
+Файлы реализуют дополнительные представления графа:
 
-- `AlgorithmParams` — параметры запуска алгоритма;
-- `AlgorithmMetrics` — метрики выполнения;
-- `AlgorithmResult` — результат алгоритма;
+- adjacency list;
+- forward star form, FSF;
+- backward star form, BSF.
+
+Содержат структуры `AdjacencyListEdge`, `AdjacencyListRow`, `AdjacencyList`, `ForwardStarForm`, `BackwardStarForm`, функции преобразования из `DirectedGraph` и `ReachabilityGraph`, а также функции сериализации и десериализации JSON.
+
+Эти представления уже реализованы и покрыты тестами, но сами DFS/BFS/Dijkstra сейчас работают с `DirectedGraph`, а не напрямую с FSF/BSF.
+
+### `include/petri/algorithms/algorithms.hpp` и `src/algorithms/algorithms.cpp`
+
+Файлы объявляют и реализуют алгоритмы:
+
 - `run_dfs()`;
 - `run_bfs()`;
 - `run_dijkstra()`.
 
-`src/algorithms/algorithms.cpp` реализует DFS, BFS и алгоритм Дейкстры для `DirectedGraph`. Все три функции возвращают `Result<AlgorithmResult>`, то есть либо результат с путём и метриками, либо структурированную ошибку.
+Общий вход алгоритмов:
 
-### Селектор алгоритмов
+- `DirectedGraph`;
+- `AlgorithmParams`, где есть `source_vertex_id` и необязательный `target_vertex_id`.
 
-`include/petri/algorithm_selector/algorithm_selector.hpp` объявляет слой выбора алгоритма поверх runtime:
+Общий выход:
 
-- `SelectionWeights` — веса критериев скоринга: время выполнения, длина пути, стоимость пути и число посещённых вершин;
-- `AlgorithmCandidateReport` — строка сравнения для одного алгоритма;
-- `AlgorithmSelectionRequest` — задача, параметры, список алгоритмов и веса выбора;
-- `AlgorithmSelectionReport` — итоговый отчёт со всеми кандидатами, лучшим алгоритмом и лучшим результатом;
-- `score_algorithm_result()` считает взвешенный балл результата;
-- `select_algorithm()` запускает несколько алгоритмов через `AlgorithmRegistry` и выбирает результат с минимальным баллом;
-- `algorithm_selection_report_to_json()` формирует JSON-отчёт с таблицей сравнения.
+- `AlgorithmResult` с именем алгоритма, статусом, признаком найденного пути, путём и метриками.
 
-`src/algorithm_selector/algorithm_selector.cpp` реализует запуск набора алгоритмов на одной задаче. Если список алгоритмов пуст, используются все алгоритмы из переданного реестра. Ошибка отдельного алгоритма, например `UNKNOWN_ALGORITHM`, записывается в таблицу сравнения как строка со статусом `error`, но не останавливает сравнение остальных кандидатов. Если в `AlgorithmTask.context.log_metrics` включено логирование, каждый запуск кандидата проходит через runtime и сохраняет метрики тем же механизмом `logging_metrics`.
+Метрики хранятся в `AlgorithmMetrics`: время, посещённые вершины, просмотренные рёбра, длина пути и стоимость пути.
 
-### Runtime выбора алгоритма
+### `include/petri/runtime/algorithm_runtime.hpp` и `src/runtime/algorithm_runtime.cpp`
 
-`include/petri/runtime/algorithm_runtime.hpp` объявляет единый runtime-интерфейс алгоритмов:
+Файлы реализуют единый runtime-интерфейс алгоритмов.
 
-- `AlgorithmRunContext` — контекст запуска для логирования метрик;
-- `AlgorithmTask` — описание задачи алгоритма: имя алгоритма, граф и контекст;
-- `Algorithm` — базовый интерфейс алгоритма с методами `name()` и `run(graph, params)`;
-- `AlgorithmRunner` — функциональный тип для регистрации алгоритма без отдельного класса;
-- `AlgorithmRegistry` — реестр алгоритмов;
-- `create_builtin_algorithm_registry()` создаёт реестр со встроенными алгоритмами;
-- `available_algorithms()` возвращает список встроенных алгоритмов;
-- `run(task, params)` запускает задачу через встроенный реестр;
-- `run_algorithm(name, graph, params)` оставлен как совместимый фасад.
+Содержат:
 
-`src/runtime/algorithm_runtime.cpp` реализует реестр алгоритмов. Встроенный реестр регистрирует:
+- `AlgorithmRunContext`;
+- `AlgorithmTask`;
+- абстрактный класс `Algorithm`;
+- тип `AlgorithmRunner`;
+- класс `AlgorithmRegistry`;
+- `create_builtin_algorithm_registry()`;
+- `available_algorithms()`;
+- `run()`;
+- `run_algorithm()`.
 
-- `"dfs"` вызывает `run_dfs()`;
-- `"bfs"` вызывает `run_bfs()`;
-- `"dijkstra"` вызывает `run_dijkstra()`;
-- неизвестное имя возвращает ошибку `UNKNOWN_ALGORITHM`.
+Runtime регистрирует встроенные `dfs`, `bfs`, `dijkstra`, запускает алгоритм по имени и умеет записывать метрики через `logging_metrics`, если в `AlgorithmRunContext` включён `log_metrics`.
 
-`AlgorithmRegistry` умеет регистрировать объект `Algorithm` или функциональный `AlgorithmRunner`. Это оставляет архитектурное место для будущих пользовательских алгоритмов и плагинов без реализации механизма загрузки плагинов в текущей версии.
+### `include/petri/algorithm_selector/algorithm_selector.hpp` и `src/algorithm_selector/algorithm_selector.cpp`
 
-Если в `AlgorithmTask.context.log_metrics` установлено `true`, runtime создаёт запись `RunMetricsRecord` и сохраняет её через модуль `logging_metrics`. Для успешного запуска записываются метрики из `AlgorithmResult.metrics`; для ошибки неизвестного алгоритма или ошибки выполнения записывается `found = false` и сообщение ошибки.
+Файлы реализуют выбор алгоритма по взвешенной оценке метрик.
 
-Этот слой используется JSON-адаптером, чтобы внешний запрос мог указывать алгоритм строкой и запускать его через единый интерфейс.
+Содержат:
 
-### JSON-адаптер
+- `SelectionWeights`;
+- `AlgorithmCandidateReport`;
+- `AlgorithmSelectionRequest`;
+- `AlgorithmSelectionReport`;
+- `score_algorithm_result()`;
+- `select_algorithm()`;
+- `algorithm_selection_report_to_json()`.
 
-`include/petri/service_adapter/json_api.hpp` объявляет класс и функции:
+Выборщик запускает несколько алгоритмов на одной задаче, считает score по весам `elapsed_ms`, `path_length`, `path_cost`, `visited_vertices` и выбирает лучший eligible-результат.
 
-- `JsonServiceAdapter` — статeless-класс библиотечного адаптера с методами `handle()` и `handle_json()`;
+### `include/petri/logging_metrics/metrics_logger.hpp` и `src/logging_metrics/metrics_logger.cpp`
+
+Файлы реализуют логирование метрик запусков.
+
+Содержат:
+
+- `RunMetricsInput`;
+- `RunMetricsRecord`;
+- `create_metrics_record()`;
+- `metrics_record_to_json()`;
+- `metrics_record_from_json()`;
+- `default_metrics_log_path()`;
+- `append_metrics_record()`;
+- `read_metrics_records()`.
+
+Метрики пишутся в JSONL. Путь по умолчанию: `logs/metrics.jsonl`.
+
+### `include/petri/storage_api/storage_api.hpp` и `src/storage_api/storage_api.cpp`
+
+Файлы реализуют файловое хранилище.
+
+Содержат:
+
+- `StorageConfig`;
+- `StoredArtifact`;
+- `models_directory()`;
+- `runs_directory()`;
+- `metrics_directory()`;
+- `generate_run_id()`;
+- `save_model()`;
+- `load_model()`;
+- `save_run_result()`;
+- `load_run_result()`;
+- `save_metrics()`.
+
+По умолчанию данные сохраняются в папке `data/`: модели в `data/models`, результаты запусков в `data/runs`, метрики в `data/metrics`. Этот модуль существует как отдельный API и не вызывается автоматически из `service_adapter`.
+
+### `include/petri/service_adapter/json_api.hpp` и `src/service_adapter/json_api.cpp`
+
+Файлы реализуют библиотечный JSON service adapter.
+
+Содержат:
+
+- класс `JsonServiceAdapter`;
 - `error_response()`;
 - `simulate_request()`;
 - `algorithm_request()`;
 - `handle_request()`;
 - `handle_request_json()`.
 
-`src/service_adapter/json_api.cpp` реализует внешний JSON API. Он принимает JSON-запрос, достаёт из него сеть Петри, создаёт `PetriNet`, запускает симуляцию или алгоритм и формирует JSON-ответ. Адаптер не содержит HTTP-сервера и предназначен для вызова из C++-кода, будущих Python-биндингов или тонкого серверного слоя.
+Adapter принимает JSON-запрос, создаёт `PetriNet`, запускает симуляцию или алгоритм и возвращает JSON-ответ. Это не HTTP-сервер: он не открывает порт и не работает с сетью.
 
-### Файловое хранилище
+### `src/bindings/python_bindings.cpp`
 
-`include/petri/storage_api/storage_api.hpp` объявляет библиотечный API для сохранения JSON-артефактов проекта:
+Файл реализует опциональный Python-модуль `petri_core` через `pybind11`.
 
-- `StorageConfig` — корневая папка хранилища, по умолчанию `data`;
-- `StoredArtifact` — id сохранённого объекта и путь к файлу;
-- `models_directory()`, `runs_directory()` и `metrics_directory()` возвращают папки `data/models`, `data/runs` и `data/metrics`;
-- `generate_run_id()` создаёт уникальный id запуска;
-- `save_model()` и `load_model()` сохраняют и загружают JSON модели сети Петри;
-- `save_run_result()` и `load_run_result()` сохраняют и загружают JSON результата запуска;
-- `save_metrics()` сохраняет метрики в JSONL-файл по id запуска.
+Экспортируемые функции:
 
-`src/storage_api/storage_api.cpp` реализует файловое хранилище без базы данных. Модели сохраняются в `data/models/<id>.json`, результаты запусков — в `data/runs/<run_id>.json`, метрики — в `data/metrics/<run_id>.jsonl`. При сохранении результата запуска в JSON добавляется поле `run_id`. Id нормализуются перед построением пути, чтобы файловый API не выходил за пределы своих папок.
+- `load_petri_net_from_json(net)`;
+- `get_enabled_transitions(net, marking=None)`;
+- `fire_transition(net, transition_id, marking=None)`;
+- `run_simulation(net, params=None)`;
+- `run_algorithm(net, params=None)`;
+- `select_algorithm(net, params=None)`.
 
-### Python-биндинги
+Python bindings принимают Python dict/list или JSON-строку, преобразуют данные в `nlohmann::json`, вызывают C++-ядро и возвращают Python dict/list.
 
-`src/bindings/python_bindings.cpp` реализует модуль `petri_core` через `pybind11`. Модуль экспортирует функции:
+### `src/cli/petri_cli.cpp`
 
-- `load_petri_net_from_json(net)` — валидирует JSON модели и возвращает имя модели, начальную маркировку и разрешённые переходы;
-- `get_enabled_transitions(net, marking=None)` — возвращает список разрешённых переходов для начальной или переданной маркировки;
-- `fire_transition(net, transition_id, marking=None)` — срабатывает переход и возвращает новую маркировку;
-- `run_simulation(net, params=None)` — вызывает существующий JSON service adapter для режима `simulate`;
-- `run_algorithm(net, params=None)` — вызывает JSON service adapter для режима `algorithm`;
-- `select_algorithm(net, params=None)` — строит граф достижимости и запускает `algorithm_selector` для нескольких алгоритмов.
+Файл реализует консольный запуск.
 
-CMake собирает Python-модуль только если найдены `Python3` development-файлы и CMake-пакет `pybind11`. Если зависимость отсутствует, C++ библиотека, CLI и C++ тесты продолжают собираться, а CMake выводит предупреждение. `tests/python_smoke_test.py` регистрируется в CTest только вместе с собранным Python-модулем.
-
-### CLI
-
-`src/cli/petri_cli.cpp` содержит простое консольное приложение. Оно принимает путь к JSON-файлу сети Петри и необязательный режим:
+Команда:
 
 ```text
 petri_cli <net.json> [simulate|bfs|dfs|dijkstra]
 ```
 
-Если режим равен `simulate`, CLI формирует запрос симуляции. Если указан `bfs`, `dfs` или `dijkstra`, CLI формирует запрос алгоритма по графу достижимости. Затем CLI вызывает `petri::handle_request()` и печатает JSON-ответ в консоль.
+CLI читает JSON сети из файла, формирует запрос к `petri::handle_request()` и печатает JSON-ответ.
 
-### Тесты
+### `examples/mutex.json`
 
-`tests/test_main.cpp` подключает `doctest` и создаёт точку входа для всех тестов.
+Файл содержит демонстрационную сеть Петри для взаимного исключения двух процессов. В ней 7 мест, 6 переходов и 16 дуг.
 
-`tests/core_pn_tests.cpp` проверяет загрузку примера `mutex.json`, валидацию некорректных дуг и токенов, поиск разрешённых переходов, срабатывание перехода и работу интерпретатора.
+### `examples/python_demo.py`
 
-`tests/algorithms_tests.cpp` проверяет BFS, DFS, Dijkstra и ошибку неизвестного алгоритма.
+Файл демонстрирует вызов Python-модуля `petri_core`: загрузку сети, получение разрешённых переходов, срабатывание перехода, симуляцию, запуск BFS и выбор алгоритма.
 
-`tests/algorithm_selector_tests.cpp` проверяет взвешенный выбор BFS по длине пути, Dijkstra по стоимости пути, JSON-отчёт сравнения и строку ошибки для неизвестного алгоритма.
+### `tests/`
 
-`tests/graph_models_tests.cpp` проверяет преобразование графа достижимости в список смежности, FSF и BSF, а также сериализацию и десериализацию этих структур.
+Тесты покрывают основные модули:
 
-`tests/integration_contract_tests.cpp` проверяет JSON-контракт библиотечного интеграционного слоя: форму ответа симуляции, ответы BFS и Dijkstra с маршрутом, метриками и маркировками состояний, строковый вход `handle_request_json()` и структурированную ошибку неизвестного алгоритма.
+- `core_pn_tests.cpp` проверяет загрузку сети, валидацию, разрешённость переходов, срабатывание и интерпретатор;
+- `algorithms_tests.cpp` проверяет DFS, BFS, Dijkstra;
+- `runtime_tests.cpp` проверяет реестр алгоритмов и логирование через runtime;
+- `algorithm_selector_tests.cpp` проверяет выбор лучшего алгоритма;
+- `graph_models_tests.cpp` проверяет adjacency list, FSF, BSF и JSON-сериализацию;
+- `integration_tests.cpp` проверяет связку `PetriNet -> reachability_graph -> algorithm`;
+- `integration_contract_tests.cpp` проверяет форму JSON-ответов для интеграции;
+- `service_adapter_tests.cpp` проверяет JSON adapter и ошибки;
+- `metrics_logger_tests.cpp` проверяет JSONL-метрики;
+- `storage_api_tests.cpp` проверяет файловое сохранение моделей, результатов и метрик;
+- `python_smoke_test.py` проверяет Python bindings, если они собраны;
+- `test_main.cpp` подключает `doctest` main.
 
-`tests/integration_tests.cpp` проверяет совместную работу сети Петри, графа достижимости и алгоритмов.
+## 4. Подробное описание кода
 
-`tests/metrics_logger_tests.cpp` проверяет создание записи метрик, сохранение и чтение JSONL-файла, а также автоматическую запись успешного и ошибочного запуска через JSON service adapter.
+### Обработка ошибок
 
-`tests/runtime_tests.cpp` проверяет список встроенных алгоритмов в runtime, запуск через `AlgorithmTask`, регистрацию функционального алгоритма в `AlgorithmRegistry`, ошибку `UNKNOWN_ALGORITHM` и запись метрик runtime.
+Единый механизм ошибок находится в `include/petri/common/result.hpp`.
 
-`tests/service_adapter_tests.cpp` проверяет JSON-ответы симуляции, JSON-ответы алгоритма и структурированную ошибку для некорректного запроса.
+`Error` содержит:
 
-`tests/storage_api_tests.cpp` проверяет сохранение и загрузку модели, сохранение и загрузку результата запуска с уникальным `run_id`, запись метрик в JSONL и ошибку пустого id модели.
+- `code` - машинный код ошибки;
+- `message` - понятное сообщение;
+- `details` - дополнительные данные в виде `std::map<std::string, std::string>`.
 
-`tests/python_smoke_test.py` проверяет импорт Python-модуля `petri_core`, базовую загрузку сети, получение разрешённых переходов, срабатывание перехода, запуск симуляции, запуск алгоритма и выбор алгоритма. Этот smoke-test добавляется в CTest только когда CMake реально собрал Python-модуль.
+`Result<T>` хранит либо значение `T`, либо `Error`. Успешный результат создаётся через `Result<T>::success(value)`, ошибочный через `Result<T>::failure(error)`.
 
-## 3. Подробное описание кода
+Метод `value()` выбрасывает `std::logic_error`, если попытаться получить значение из ошибочного результата. Метод `error()` выбрасывает `std::logic_error`, если попытаться получить ошибку из успешного результата. В нормальном коде перед этим вызывается `has_value()` или используется `if (result)`.
 
-### `include/petri/common/result.hpp`
+Типичные коды ошибок:
 
-Файл задаёт единый способ возвращать успешный результат или ошибку без смешивания разных подходов.
+- `INVALID_JSON`;
+- `DUPLICATE_ID`;
+- `UNKNOWN_NODE_ID`;
+- `INVALID_ARC_ENDPOINT`;
+- `INVALID_ARC_DIRECTION`;
+- `INVALID_ARC_WEIGHT`;
+- `INVALID_TOKEN_COUNT`;
+- `UNKNOWN_TRANSITION_ID`;
+- `TRANSITION_NOT_ENABLED`;
+- `UNKNOWN_ALGORITHM`;
+- `NEGATIVE_EDGE_WEIGHT`;
+- `STATE_LIMIT_EXCEEDED`;
+- `TARGET_NOT_FOUND`;
+- `INVALID_ALGORITHM`;
+- `INVALID_ALGORITHM_TASK`;
+- `METRICS_LOG_ERROR`;
+- `STORAGE_ERROR`;
+- `INVALID_STORAGE_ID`.
 
-`struct Error` содержит:
+### Модель сети Петри
 
-- `code` — машинно-читаемый код ошибки, например `INVALID_JSON` или `UNKNOWN_ALGORITHM`;
-- `message` — человекочитаемое сообщение;
-- `details` — словарь дополнительных строковых деталей.
+`Place` содержит:
 
-`template <typename T> class Result` содержит:
+- `id`;
+- `label`;
+- `tokens`.
 
-- приватное поле `std::optional<T> value_`;
-- приватное поле `Error error_`.
+`Transition` содержит:
 
-Основные методы `Result<T>`:
+- `id`;
+- `label`;
+- `fire_time`.
 
-- `static success(T value)` создаёт успешный результат и сохраняет значение;
-- `static failure(Error error)` создаёт ошибочный результат;
-- `has_value()` сообщает, есть ли значение;
-- `operator bool()` позволяет писать `if (result)`;
-- `value()` возвращает сохранённое значение или выбрасывает `std::logic_error`, если результата нет;
-- `error()` возвращает ошибку или выбрасывает `std::logic_error`, если результат успешный.
+`Arc` содержит:
 
-`Result<void>` нужен для проверок, где нет полезного возвращаемого значения. В текущем коде он используется при валидации параметров алгоритма.
+- `id`;
+- `source`;
+- `target`;
+- `weight`;
+- `direction`.
 
-`make_error()` создаёт `Error` из кода, сообщения и необязательных деталей.
+`ArcDirection` может быть:
 
-Роль файла: он связывает все модули общим форматом ошибок. Благодаря этому `PetriNet`, алгоритмы и JSON-адаптер могут одинаково передавать ошибки наверх.
+- `PlaceToTransition`;
+- `TransitionToPlace`.
 
-### `include/petri/core_pn/model.hpp`
+`Marking` хранит вектор токенов `tokens_`. Порядок токенов соответствует порядку мест в `PetriNet::places_`.
 
-Файл содержит базовые структуры сети Петри.
+Методы `Marking`:
 
-`struct Place` описывает место:
+- `tokens() const` возвращает константный вектор токенов;
+- `tokens()` возвращает изменяемый вектор;
+- `at(index)` возвращает число токенов по индексу;
+- `set(index, value)` меняет число токенов;
+- `size()` возвращает размер вектора;
+- `key()` строит строковый ключ маркировки, например `1|0|2`;
+- `operator==` сравнивает маркировки.
 
-- `id` — внутренний идентификатор места;
-- `label` — подпись для отображения;
-- `tokens` — начальное количество токенов.
+`SimulationEvent` содержит номер шага, время, id сработавшего перехода, маркировку до и после шага, а также списки разрешённых переходов до и после шага.
 
-`struct Transition` описывает переход:
+### `PetriNet`
 
-- `id` — внутренний идентификатор перехода;
-- `label` — подпись для отображения;
-- `fire_time` — длительность или стоимость срабатывания. По умолчанию равна `1.0`.
+Класс `PetriNet` объявлен в `petri_net.hpp` и реализован в `petri_net.cpp`.
 
-`enum class ArcDirection` описывает направление дуги:
+Поля класса:
 
-- `PlaceToTransition` — дуга из места в переход;
-- `TransitionToPlace` — дуга из перехода в место.
+- `name_` - имя сети;
+- `places_` - места;
+- `transitions_` - переходы;
+- `arcs_` - дуги;
+- `place_index_by_id_` - словарь `place id -> index`;
+- `transition_index_by_id_` - словарь `transition id -> index`;
+- `input_arcs_by_transition_` - входные дуги каждого перехода;
+- `output_arcs_by_transition_` - выходные дуги каждого перехода.
 
-`struct Arc` описывает дугу:
+Внутренняя структура `WeightedPlace` хранит:
 
-- `id` — идентификатор дуги;
-- `source` — id исходного узла;
-- `target` — id целевого узла;
-- `weight` — вес дуги, по умолчанию `1`;
-- `direction` — направление дуги.
+- индекс места;
+- вес дуги;
+- id дуги.
 
-`class Marking` хранит текущую маркировку сети:
+Метод `from_json(data)` принимает `nlohmann::json` и возвращает `Result<PetriNet>`. Он проверяет:
 
-- приватное поле `std::vector<int> tokens_` хранит токены в порядке массива `places_` внутри `PetriNet`.
-
-Основные методы `Marking`:
-
-- конструктор `Marking(std::vector<int> tokens)` принимает вектор токенов;
-- `tokens() const` возвращает константную ссылку на вектор;
-- `tokens()` возвращает изменяемую ссылку;
-- `at(index)` возвращает количество токенов по индексу места;
-- `set(index, value)` записывает количество токенов по индексу;
-- `size()` возвращает число мест в маркировке;
-- `key()` формирует строковый ключ вида `1|0|0`. Он используется при построении графа достижимости, чтобы определять, встречалась ли такая маркировка раньше;
-- `operator==` сравнивает две маркировки по вектору токенов.
-
-`struct SimulationEvent` описывает один шаг симуляции:
-
-- `step` — номер шага;
-- `time` — модельное время после срабатывания перехода;
-- `fired_transition` — id сработавшего перехода;
-- `marking_before` — маркировка до шага;
-- `marking_after` — маркировка после шага;
-- `enabled_before` — переходы, разрешённые до шага;
-- `enabled_after` — переходы, разрешённые после шага.
-
-Роль файла: он задаёт простые типы, на которых строятся `PetriNet`, `Interpreter`, граф достижимости и JSON-ответы.
-
-### `include/petri/logging_metrics/metrics_logger.hpp` и `src/logging_metrics/metrics_logger.cpp`
-
-Эти файлы реализуют модуль `logging_metrics`, который формирует и сохраняет метрики запусков симуляции и алгоритмов.
-
-Публичные структуры:
-
-- `RunMetricsInput` — входные данные для создания записи метрик;
-- `RunMetricsRecord` — готовая запись метрик.
-
-Запись содержит:
-
-- `request_id`;
-- `algorithm_name` — имя алгоритма или `simulation` для симуляции;
-- `task_type` — тип задачи, например `simulation` или `reachability_graph`;
-- `place_count`, `transition_count`, `arc_count`;
-- `built_state_count`;
-- `scanned_edge_count`;
-- `elapsed_ms`;
-- `found`;
-- `path_cost`;
-- `path_length`;
-- `error_message`.
-
-Публичные функции:
-
-- `create_metrics_record(input)` создаёт запись метрик;
-- `metrics_record_to_json(record)` преобразует запись в JSON;
-- `metrics_record_from_json(data)` восстанавливает запись из JSON;
-- `default_metrics_log_path()` возвращает путь `logs/metrics.jsonl`;
-- `append_metrics_record(record)` добавляет запись в стандартный JSONL-журнал;
-- `append_metrics_record(record, path)` добавляет запись в указанный JSONL-файл;
-- `read_metrics_records()` читает записи из стандартного JSONL-журнала;
-- `read_metrics_records(path)` читает записи из указанного JSONL-файла.
-
-Формат хранения — JSONL: каждая строка файла является отдельным JSON-объектом метрик. Перед записью модуль создаёт родительскую папку, если её ещё нет. Ошибки записи и чтения возвращаются через `Result` с кодом `METRICS_LOG_ERROR`; ошибки разбора JSONL возвращаются с кодом `INVALID_JSON`.
-
-JSON service adapter вызывает этот модуль для каждого запуска `simulate_request()` и `algorithm_request()`. Успешные запуски записываются с пустым `error_message`; ошибочные запуски записываются с `found = false` и человекочитаемым сообщением ошибки.
-
-### `include/petri/core_pn/petri_net.hpp` и `src/core_pn/petri_net.cpp`
-
-Эти файлы реализуют центральную модель сети Петри.
-
-`class PetriNet` хранит:
-
-- `name_` — имя сети;
-- `places_` — список мест;
-- `transitions_` — список переходов;
-- `arcs_` — список дуг;
-- `place_index_by_id_` — быстрый поиск индекса места по id;
-- `transition_index_by_id_` — быстрый поиск индекса перехода по id;
-- `input_arcs_by_transition_` — для каждого перехода список входных мест с весами дуг;
-- `output_arcs_by_transition_` — для каждого перехода список выходных мест с весами дуг.
-
-Внутренняя структура `WeightedPlace` содержит:
-
-- `place_index` — индекс места в `places_`;
-- `weight` — вес дуги;
-- `arc_id` — id дуги.
-
-Основные публичные методы `PetriNet`:
-
-- `from_json(const nlohmann::json& data)` создаёт сеть Петри из JSON.
-- `load_from_file(const std::string& path)` читает JSON из файла и вызывает `from_json()`.
-- `name()` возвращает имя сети.
-- `places()` возвращает список мест.
-- `transitions()` возвращает список переходов.
-- `arcs()` возвращает список дуг.
-- `initial_marking()` строит начальную маркировку из поля `tokens` каждого места.
-- `marking_to_json(const Marking& marking)` преобразует маркировку в объект JSON вида `{ "p1": 1, "p2": 0 }`.
-- `enabled_transitions(const Marking& marking)` возвращает список id переходов, которые разрешены в данной маркировке.
-- `is_enabled(const Marking& marking, const std::string& transition_id)` проверяет один переход.
-- `fire_transition(const Marking& marking, const std::string& transition_id)` атомарно выполняет переход и возвращает новую маркировку.
-- `has_place(id)` проверяет наличие места.
-- `has_transition(id)` проверяет наличие перехода.
-- `place_index(id)` возвращает индекс места или `std::nullopt`.
-- `transition_index(id)` возвращает индекс перехода или `std::nullopt`.
-- `transition_fire_time(transition_id)` возвращает `fire_time` перехода. Если id неизвестен, метод возвращает `1.0`.
-- `marking_matches(marking, partial_marking)` проверяет, подходит ли маркировка под частичный JSON-образец. Образец должен содержать хотя бы одно известное место; неизвестные id мест не считаются совпадением.
-
-`from_json()` выполняет основную валидацию входной сети:
-
-- корневой JSON должен быть объектом;
-- поля `places`, `transitions` и `arcs` должны быть массивами;
-- `id` места, перехода и дуги должен быть строкой;
-- id внутри своей категории не должен быть пустым или повторяться;
+- корень должен быть объектом;
+- `name`, если задан, должен быть строкой;
+- `places`, `transitions`, `arcs` должны быть массивами;
+- элементы массивов должны быть объектами;
+- id мест, переходов и дуг должны быть строками;
+- id не должны быть пустыми или повторяться внутри своей группы;
 - `tokens` должен быть неотрицательным целым числом;
 - `fire_time` должен быть неотрицательным числом;
-- `weight` дуги должен быть положительным целым числом;
+- `weight` должен быть положительным целым числом;
 - `source` и `target` дуги должны ссылаться на существующие место или переход;
-- дуга должна соединять место и переход, а не два места и не два перехода.
+- дуга должна соединять место с переходом или переход с местом.
 
-`rebuild_indices()` пересобирает внутренние индексы. Он заполняет `place_index_by_id_`, `transition_index_by_id_`, `input_arcs_by_transition_` и `output_arcs_by_transition_`. Этот метод вызывается после чтения мест и переходов, а затем ещё раз после чтения дуг.
+Метод `load_from_file(path)` читает JSON из файла и вызывает `from_json()`.
 
-`enabled_transitions()` проходит по всем переходам и проверяет входные дуги. Переход считается разрешённым, если во всех входных местах достаточно токенов с учётом веса дуги.
+Метод `rebuild_indices()` пересобирает индексы и списки входных/выходных дуг. Он вызывается после чтения мест и переходов, а затем после чтения дуг.
 
-`fire_transition()` сначала вызывает `is_enabled()`. Если переход неизвестен или не разрешён, возвращается ошибка. Если переход можно выполнить, метод копирует текущую маркировку, затем вычитает токены из входных мест и прибавляет токены в выходные места. Это реализует атомарное срабатывание перехода.
+Метод `initial_marking()` строит `Marking` из начальных токенов мест.
 
-Роль файлов: `PetriNet` является основой всей программы. Без него не работает ни симуляция, ни граф достижимости, ни алгоритмы над графом достижимости.
+Метод `marking_to_json(marking)` возвращает JSON-объект `{place_id: token_count}`.
 
-### `include/petri/core_pn/interpreter.hpp` и `src/core_pn/interpreter.cpp`
+Метод `enabled_transitions(marking)` возвращает id всех переходов, для которых во всех входных местах достаточно токенов.
 
-Эти файлы реализуют пошаговую симуляцию сети Петри.
+Метод `is_enabled(marking, transition_id)` проверяет один переход и возвращает `Result<bool>`.
 
-`enum class SimulationStrategy` содержит стратегии выбора перехода:
+Метод `fire_transition(marking, transition_id)` выполняет атомарное срабатывание: сначала вычитает токены из входных мест, затем добавляет токены в выходные места. Если переход неизвестен или не разрешён, возвращается ошибка.
 
-- `FirstEnabled` — выбрать первый разрешённый переход;
-- `ById` — выбрать переход по заданному id;
-- `RoundRobin` — циклически выбирать следующий разрешённый переход.
+Методы `has_place()`, `has_transition()`, `place_index()`, `transition_index()` используются для валидации и быстрого доступа.
 
-`struct SimulationParams` содержит:
+Метод `transition_fire_time(transition_id)` возвращает `fire_time`; для неизвестного id возвращает `1.0`.
 
-- `max_steps` — максимальное число шагов, по умолчанию `1`;
-- `strategy` — стратегия выбора перехода;
-- `stop_on_deadlock` — останавливать ли запуск при тупике;
-- `return_events` — возвращать ли события шагов;
-- `transition_id` — id перехода для стратегии `ById` или явного шага.
+Метод `marking_matches(marking, partial_marking)` проверяет, соответствует ли маркировка частичному JSON-описанию. В текущей версии частичная маркировка должна быть непустой, все её place id должны существовать, а значения должны совпасть.
 
-`struct SimulationRun` содержит:
+### Интерпретатор
 
-- `initial_marking` — маркировку перед запуском;
-- `final_marking` — маркировку после запуска;
-- `events` — список событий;
-- `steps_executed` — число выполненных шагов;
-- `elapsed_ms` — реальное время выполнения симуляции в миллисекундах;
-- `deadlock` — признак тупика.
+`SimulationStrategy` задаёт стратегию выбора перехода:
 
-Функция `parse_strategy()` принимает строку из JSON и возвращает `SimulationStrategy`. Поддерживаются строки `first_enabled`, `by_id` и `round_robin`.
+- `FirstEnabled` - первый разрешённый переход;
+- `ById` - переход с заданным id;
+- `RoundRobin` - циклический выбор следующего разрешённого перехода.
 
-Функция `strategy_to_string()` делает обратное преобразование из enum в строку.
+`SimulationParams` содержит:
 
-`class Interpreter` хранит:
+- `max_steps`;
+- `strategy`;
+- `stop_on_deadlock`;
+- `return_events`;
+- `transition_id`.
 
-- ссылку `net_` на `PetriNet`;
-- текущую `marking_`;
-- `step_index_` — номер последнего выполненного шага;
-- `current_time_` — модельное время;
-- `round_robin_cursor_` — позицию для циклического выбора перехода.
-
-Конструктор `Interpreter(const PetriNet& net)` начинает с начальной маркировки сети.
-
-Конструктор `Interpreter(const PetriNet& net, Marking marking)` начинает с переданной маркировки.
-
-`marking()` возвращает текущую маркировку.
-
-`current_time()` возвращает текущее модельное время.
-
-`choose_transition()` выбирает переход из списка разрешённых:
-
-- если список пустой, возвращает ошибку `TRANSITION_NOT_ENABLED`;
-- если передан конкретный `transition_id` или выбрана стратегия `ById`, проверяет, что этот переход разрешён;
-- для `RoundRobin` ищет следующий разрешённый переход, начиная с `round_robin_cursor_`;
-- для `FirstEnabled` возвращает первый id из списка разрешённых.
-
-`step()` выполняет один шаг:
-
-1. Сохраняет маркировку до шага.
-2. Получает список разрешённых переходов через `PetriNet::enabled_transitions()`.
-3. Выбирает переход через `choose_transition()`.
-4. Получает новую маркировку через `PetriNet::fire_transition()`.
-5. Увеличивает модельное время на `PetriNet::transition_fire_time()`.
-6. Обновляет текущую маркировку.
-7. Формирует `SimulationEvent`.
-
-`run()` выполняет серию шагов до `max_steps`. Перед каждым шагом он проверяет, есть ли разрешённые переходы. Если переходов нет и `stop_on_deadlock = true`, запуск останавливается и ставится `deadlock = true`. В конце метод возвращает `SimulationRun`.
-
-Роль файлов: интерпретатор превращает статическую модель `PetriNet` в динамическое выполнение: шаги, события, финальную маркировку и метрики запуска.
-
-### `include/petri/graph_models/directed_graph.hpp` и `src/graph_models/directed_graph.cpp`
-
-Эти файлы реализуют простой ориентированный граф.
-
-`struct GraphEdge` содержит:
-
-- `id` — идентификатор ребра;
-- `source` — id исходной вершины;
-- `target` — id целевой вершины;
-- `label` — подпись ребра. В графе достижимости здесь хранится id перехода сети Петри;
-- `weight` — вес ребра.
-
-`class DirectedGraph` хранит:
-
-- `index_by_id_` — индекс вершины по её id;
-- `vertex_ids_` — список id вершин;
-- `adjacency_` — список исходящих рёбер для каждой вершины;
-- `edge_count_` — количество рёбер.
-
-Методы `DirectedGraph`:
-
-- `add_vertex(id)` добавляет вершину, если её ещё нет;
-- `add_edge(edge)` добавляет ребро и автоматически добавляет его исходную и целевую вершины;
-- `has_vertex(id)` проверяет наличие вершины;
-- `vertex_ids()` возвращает список вершин;
-- `edges_from(id)` возвращает исходящие рёбра вершины. Если вершины нет, возвращается пустой список;
-- `edge_between(source, target)` ищет первое ребро между двумя вершинами;
-- `vertex_count()` возвращает число вершин;
-- `edge_count()` возвращает число рёбер.
-
-Роль файлов: `DirectedGraph` является общей структурой для DFS, BFS, Dijkstra и графа достижимости.
-
-### `include/petri/graph_models/reachability.hpp` и `src/graph_models/reachability.cpp`
-
-Эти файлы строят граф достижимости маркировок сети Петри.
-
-`struct ReachabilityOptions` содержит:
-
-- `max_states` — максимальное число вершин, по умолчанию `1000`;
-- `max_depth` — максимальная глубина обхода, по умолчанию `20`.
-
-`struct ReachabilityGraph` содержит:
-
-- `graph` — объект `DirectedGraph`;
-- `initial_vertex_id` — id вершины начальной маркировки;
-- `markings` — соответствие `vertex_id -> Marking`;
-- `depths` — соответствие `vertex_id -> depth`.
-
-`build_reachability_graph()` принимает `PetriNet` и `ReachabilityOptions`. Если `max_states` равен нулю, функция возвращает ошибку `STATE_LIMIT_EXCEEDED`. Затем она создаёт начальную вершину `m0` по `net.initial_marking()` и обходит достижимые маркировки через очередь.
-
-Для каждой текущей маркировки функция:
-
-1. Проверяет ограничение `max_depth`.
-2. Получает разрешённые переходы через `PetriNet::enabled_transitions()`.
-3. Для каждого перехода строит новую маркировку через `PetriNet::fire_transition()`.
-4. Добавляет новую вершину, если такой маркировки ещё не было.
-5. Добавляет ребро `GraphEdge` из текущей вершины в новую.
-
-Id вершин имеют вид `m0`, `m1`, `m2` и так далее. Id рёбер имеют вид `e0`, `e1`, `e2` и так далее. В поле `label` ребра записывается id перехода, а в поле `weight` записывается `transition.fire_time`.
-
-`find_marking_vertex()` ищет вершину графа достижимости по частичной маркировке. Например, JSON `{ "p1_cs": 1 }` означает: найти любую вершину, где в месте `p1_cs` находится один токен.
-
-`reachability_graph_to_json()` преобразует граф достижимости в JSON с массивами `vertices` и `edges`. В текущем JSON API эта функция объявлена и реализована, но основной ответ `algorithm_request()` возвращает только количество вершин и рёбер, а не полный граф.
-
-Роль файлов: они переводят поведение сети Петри в обычный ориентированный граф, по которому затем можно запускать DFS, BFS и Dijkstra.
-
-### `include/petri/algorithms/algorithms.hpp` и `src/algorithms/algorithms.cpp`
-
-Эти файлы реализуют три алгоритма над `DirectedGraph`.
-
-`struct AlgorithmParams` содержит:
-
-- `source_vertex_id` — id начальной вершины;
-- `target_vertex_id` — необязательный id целевой вершины.
-
-Если цель не задана, DFS, BFS и Dijkstra возвращают порядок обхода как путь.
-
-`struct AlgorithmMetrics` содержит:
-
-- `elapsed_ms` — время выполнения алгоритма в миллисекундах;
-- `visited_vertices` — число посещённых вершин;
-- `scanned_edges` — число просмотренных рёбер;
-- `path_length` — длина найденного пути в рёбрах;
-- `path_cost` — стоимость найденного пути.
-
-`struct AlgorithmResult` содержит:
-
-- `algorithm` — имя алгоритма;
-- `status` — строковый статус, например `ok` или `target_not_found`;
-- `found` — найден ли путь;
-- `path` — список id вершин;
-- `metrics` — метрики выполнения.
-
-Внутри `algorithms.cpp` есть вспомогательные функции:
-
-- `elapsed_ms()` считает прошедшее время;
-- `reconstruct_path()` восстанавливает путь от источника к цели по словарю родителей;
-- `path_cost()` считает стоимость пути по весам рёбер;
-- `make_traversal_result()` собирает общий `AlgorithmResult`;
-- `validate_source()` проверяет, что исходная вершина существует, и что целевая вершина существует, если она задана.
-
-`run_bfs()` реализует поиск в ширину:
-
-- принимает `DirectedGraph` и `AlgorithmParams`;
-- проверяет исходную и целевую вершины;
-- использует `std::queue`;
-- посещает вершины по слоям;
-- запоминает родителей вершин;
-- для невзвешенного графа находит путь с минимальным числом рёбер;
-- возвращает `AlgorithmResult` с путём и метриками.
-
-`run_dfs()` реализует поиск в глубину:
-
-- принимает `DirectedGraph` и `AlgorithmParams`;
-- использует `std::stack`;
-- идёт как можно глубже по рёбрам;
-- запоминает родителей вершин;
-- возвращает найденный путь до цели или порядок обхода, если цель не задана.
-
-`run_dijkstra()` реализует алгоритм Дейкстры:
-
-- принимает `DirectedGraph` и `AlgorithmParams`;
-- использует `std::priority_queue`;
-- хранит расстояния от исходной вершины;
-- выбирает вершину с минимальной текущей стоимостью;
-- обновляет расстояния до соседей;
-- возвращает кратчайший по весам путь;
-- если встречает отрицательный вес ребра, возвращает ошибку `NEGATIVE_EDGE_WEIGHT`.
-
-Роль файлов: они дают готовые алгоритмы анализа графа. В проекте они применяются к графу достижимости маркировок сети Петри.
-
-### `include/petri/runtime/algorithm_runtime.hpp` и `src/runtime/algorithm_runtime.cpp`
-
-Файл `algorithm_runtime.hpp` объявляет единый интерфейс запуска алгоритмов:
-
-- `AlgorithmRunContext` хранит контекст запуска для метрик: `request_id`, `task_type`, размеры сети, число построенных состояний, флаг `log_metrics` и необязательный путь к файлу метрик;
-- `AlgorithmTask` хранит имя алгоритма, указатель на `DirectedGraph` и `AlgorithmRunContext`;
-- `Algorithm` задаёт общий интерфейс алгоритма: `name()` и `run(graph, params)`;
-- `AlgorithmRunner` позволяет зарегистрировать алгоритм как функциональный объект;
-- `AlgorithmRegistry` хранит зарегистрированные алгоритмы и запускает их через единый метод `run(task, params)`;
-- `create_builtin_algorithm_registry()` создаёт реестр со встроенными `dfs`, `bfs`, `dijkstra`;
-- `available_algorithms()` возвращает список доступных встроенных алгоритмов;
-- `run(task, params)` запускает задачу через встроенный реестр;
-- `run_algorithm(name, graph, params)` оставлен для совместимости со старым кодом.
-
-Файл `algorithm_runtime.cpp` реализует `AlgorithmRegistry`. Метод `register_algorithm()` принимает либо объект `Algorithm`, либо пару `name + AlgorithmRunner`. Это оставляет место для будущих пользовательских алгоритмов: внешний код сможет создать свой реестр и добавить в него новые реализации без изменения встроенных DFS/BFS/Dijkstra.
-
-При запуске runtime проверяет:
-
-- что в `AlgorithmTask` есть граф;
-- что имя алгоритма зарегистрировано;
-- что выбранный алгоритм вернул успешный `AlgorithmResult`.
-
-Если имя неизвестно, возвращается ошибка `UNKNOWN_ALGORITHM`. Если `AlgorithmTask.context.log_metrics = true`, runtime записывает результат или ошибку запуска через `logging_metrics`.
-
-Роль файлов: runtime даёт единую точку регистрации, получения списка и запуска алгоритмов. JSON-адаптеру не нужно напрямую выбирать между `run_dfs()`, `run_bfs()` и `run_dijkstra()`.
-
-### `include/petri/service_adapter/json_api.hpp` и `src/service_adapter/json_api.cpp`
-
-Эти файлы реализуют внешний JSON API проекта.
-
-Публичные функции:
-
-- `JsonServiceAdapter::handle(request)` принимает объект JSON, выбирает режим и возвращает JSON-ответ;
-- `JsonServiceAdapter::handle_json(request_json)` принимает строку JSON и возвращает строку JSON-ответа;
-- `error_response(request_id, error)` создаёт JSON-ответ со статусом `error`;
-- `simulate_request(request)` обрабатывает запрос с `mode = "simulate"`;
-- `algorithm_request(request)` обрабатывает запрос с `mode = "algorithm"`;
-- `handle_request(request)` — совместимый фасад, который вызывает `JsonServiceAdapter::handle()`;
-- `handle_request_json(request_json)` — совместимый фасад, который вызывает `JsonServiceAdapter::handle_json()`.
-
-Внутренние вспомогательные функции:
-
-- `request_id_from()` достаёт `request_id`, если он есть;
-- `net_counts_from_request()` и `net_counts_from_net()` получают размеры сети для записи метрик;
-- `algorithm_from_request()` и `graph_mode_from_request()` достают значения для журнала метрик даже при ошибочных запросах;
-- `log_metrics_record()` создаёт запись `RunMetricsRecord` и добавляет её в `logs/metrics.jsonl`;
-- `event_to_json()` преобразует `SimulationEvent` в JSON;
-- `algorithm_metrics_to_json()` преобразует `AlgorithmMetrics` в JSON;
-- `params_from_request()` проверяет, что `params` отсутствует или является объектом;
-- `read_size_t_field()`, `read_bool_field()`, `read_string_field()` и `read_optional_string_field()` проверяют типы параметров до запуска ядра;
-- `validate_target_marking()` проверяет, что `target_marking` является непустым объектом, ссылается только на существующие места и содержит неотрицательные целые значения токенов;
-- `path_to_json()` преобразует путь по вершинам графа достижимости в массив JSON с маркировками и переходами;
-- `net_from_request()` проверяет наличие поля `net` и вызывает `PetriNet::from_json()`.
-
-`simulate_request()` работает так:
-
-1. Получает `request_id`.
-2. Загружает сеть через `net_from_request()`.
-3. Проверяет объект `params` и читает параметры `max_steps`, `strategy`, `stop_on_deadlock`, `return_events`, `transition_id`.
-4. Создаёт `Interpreter`.
-5. Вызывает `Interpreter::run()`.
-6. Возвращает JSON с начальными и финальными маркировками, событиями и метриками.
-
-`algorithm_request()` работает так:
-
-1. Получает `request_id`.
-2. Загружает сеть через `net_from_request()`.
-3. Проверяет объект `params` и читает параметры `graph_mode`, `algorithm`, `max_states`, `max_depth`, `source`, `target`, `target_marking`.
-4. Проверяет, что `graph_mode` равен `reachability_graph`. Другие режимы сейчас не поддержаны.
-5. Если задан `target_marking`, проверяет id мест и типы значений.
-6. Строит граф достижимости через `build_reachability_graph()`.
-7. Определяет начальную вершину. Значение `source = "initial"` заменяется на `reachability.initial_vertex_id`.
-8. Если задан `target_marking`, ищет целевую вершину через `find_marking_vertex()`.
-9. Создаёт `AlgorithmTask` с контекстом метрик и запускает алгоритм через runtime-функцию `run(task, params)`.
-10. Если алгоритм не нашёл путь к заданной цели, возвращает ошибку `TARGET_NOT_FOUND`.
-11. Возвращает JSON с путём, метриками и количеством вершин и рёбер графа.
-
-`JsonServiceAdapter::handle()` требует строковое поле `mode`. Значение `simulate` направляет запрос в `simulate_request()`, значение `algorithm` — в `algorithm_request()`. Остальные значения возвращают ошибку. Функция `handle_request()` оставлена как совместимый свободный фасад.
-
-`JsonServiceAdapter::handle_json()` нужен для интеграции через строковый JSON: он парсит входную строку и возвращает красиво отформатированный JSON с отступом 2 пробела. Функция `handle_request_json()` оставлена как совместимый свободный фасад.
-
-Все публичные входы JSON-адаптера перехватывают исключения парсинга и ошибок доступа к JSON и возвращают структурированный ответ `status = "error"`. Для некорректной сети возвращается код из слоя `PetriNet`, для неизвестного алгоритма — `UNKNOWN_ALGORITHM`, для превышения лимита графа достижимости — `STATE_LIMIT_EXCEEDED`, для недостижимой цели — `TARGET_NOT_FOUND`.
-
-Роль файлов: это слой интеграции между внешним JSON-контрактом и внутренними C++-модулями.
-
-### `src/cli/petri_cli.cpp`
-
-Файл содержит функцию `main()`.
-
-CLI принимает аргументы:
-
-- первый аргумент — путь к JSON-файлу сети Петри;
-- второй необязательный аргумент — режим `simulate`, `bfs`, `dfs` или `dijkstra`.
-
-Если файл нельзя открыть или JSON некорректен, CLI пишет ошибку в `stderr` и возвращает код `2`.
-
-Для режима `simulate` CLI формирует запрос:
-
-- `mode = "simulate"`;
-- `max_steps = 8`;
-- `strategy = "round_robin"`;
-- `stop_on_deadlock = true`;
-- `return_events = true`.
-
-Для режимов `bfs`, `dfs`, `dijkstra` CLI формирует запрос алгоритма:
-
-- `mode = "algorithm"`;
-- `graph_mode = "reachability_graph"`;
-- `algorithm` равен выбранному режиму;
-- `max_states = 100`;
-- `max_depth = 10`;
-- `source = "initial"`;
-- `target_marking = { "p1_cs": 1 }`.
-
-Затем CLI вызывает `petri::handle_request()` и печатает JSON-ответ.
-
-Роль файла: это простой способ вручную проверить ядро без отдельного Python-слоя или HTTP-сервиса.
-
-## 4. Поток данных в программе
-
-Логический поток данных выглядит так:
-
-```text
-JSON сети Петри
-  -> загрузка и валидация
-  -> модель PetriNet
-  -> интерпретатор или граф достижимости
-  -> DFS/BFS/Dijkstra
-  -> JSON-результат
-```
-
-В текущем коде есть два основных режима: `simulate` и `algorithm`. Они используют одну и ту же модель `PetriNet`, но идут разными ветками.
-
-### Вход через JSON API
-
-Внешняя точка входа находится в `src/service_adapter/json_api.cpp`.
-
-Если запрос уже представлен как `nlohmann::json`, вызывается:
-
-```cpp
-petri::handle_request(request)
-```
-
-Если запрос приходит строкой, вызывается:
-
-```cpp
-petri::handle_request_json(request_json)
-```
-
-`handle_request_json()` парсит строку через `nlohmann::json::parse()` и передаёт объект в `handle_request()`.
-
-`handle_request()` смотрит поле `mode`:
-
-- `simulate` — вызывает `simulate_request()`;
-- `algorithm` — вызывает `algorithm_request()`;
-- другое значение — возвращает JSON-ошибку.
-
-### Загрузка JSON сети Петри в `PetriNet`
-
-Обе ветки сначала вызывают внутреннюю функцию `net_from_request()` из `src/service_adapter/json_api.cpp`.
-
-`net_from_request()` проверяет, что в запросе есть поле `net`, и вызывает:
-
-```cpp
-PetriNet::from_json(request.at("net"))
-```
-
-Метод `PetriNet::from_json()` находится в `src/core_pn/petri_net.cpp`. Он читает:
-
-- `name`;
-- `places`;
-- `transitions`;
-- `arcs`.
-
-После чтения и проверки данных создаётся объект `PetriNet`. В нём построены индексы мест и переходов, а также списки входных и выходных дуг для каждого перехода.
-
-### Ветка симуляции: `PetriNet -> Interpreter -> JSON`
-
-Если `mode = "simulate"`, функция `simulate_request()`:
-
-1. Загружает `PetriNet`.
-2. Читает параметры симуляции из `params`.
-3. Создаёт объект:
-
-```cpp
-Interpreter interpreter(net);
-```
-
-4. Запускает:
-
-```cpp
-interpreter.run(params)
-```
-
-`Interpreter::run()` находится в `src/core_pn/interpreter.cpp`. Он многократно вызывает `Interpreter::step()`.
-
-`Interpreter::step()` использует методы `PetriNet`:
-
-- `enabled_transitions()` — чтобы узнать, какие переходы можно выполнить;
-- `fire_transition()` — чтобы получить новую маркировку;
-- `transition_fire_time()` — чтобы увеличить модельное время.
-
-После завершения `simulate_request()` преобразует результат в JSON:
+`SimulationRun` содержит:
 
 - `initial_marking`;
 - `final_marking`;
 - `events`;
-- `metrics.elapsed_ms`;
-- `metrics.steps_executed`;
-- `metrics.deadlock`.
+- `steps_executed`;
+- `elapsed_ms`;
+- `deadlock`.
 
-События шагов преобразуются через внутреннюю функцию `event_to_json()`.
+`parse_strategy(value)` принимает строку `first_enabled`, `by_id` или `round_robin`. Для неизвестной строки возвращает `INVALID_JSON`.
 
-### Ветка алгоритма: `PetriNet -> ReachabilityGraph -> DFS/BFS/Dijkstra -> JSON`
+`Interpreter` хранит:
 
-Если `mode = "algorithm"`, функция `algorithm_request()`:
+- ссылку на `PetriNet`;
+- текущую маркировку;
+- номер шага;
+- текущее модельное время;
+- курсор `round_robin`.
 
-1. Загружает `PetriNet`.
-2. Проверяет `graph_mode`.
-3. Создаёт `ReachabilityOptions`.
-4. Вызывает:
+`Interpreter::step()` принимает необязательный `transition_id` и стратегию. Метод получает разрешённые переходы, выбирает один переход, вызывает `PetriNet::fire_transition()`, обновляет маркировку и формирует `SimulationEvent`.
 
-```cpp
-build_reachability_graph(net, options)
-```
+`Interpreter::run(params)` выполняет до `max_steps` шагов. Если разрешённых переходов нет, устанавливается `deadlock`. Время выполнения измеряется через `std::chrono::steady_clock`.
 
-Построение графа достижимости реализовано в `src/graph_models/reachability.cpp`.
+### Графы и граф достижимости
 
-Важно: в текущем коде граф достижимости строится напрямую через методы `PetriNet`, а не через класс `Interpreter`. Для каждой маркировки вызываются:
+`GraphEdge` содержит:
 
-- `PetriNet::enabled_transitions()`;
-- `PetriNet::fire_transition()`;
-- `PetriNet::transition_fire_time()`.
+- `id`;
+- `source`;
+- `target`;
+- `label`;
+- `weight`.
 
-В результате получается `ReachabilityGraph`, внутри которого:
+В графе достижимости `label` хранит id перехода сети Петри, а `weight` хранит `fire_time`.
 
-- `graph` — обычный `DirectedGraph`;
-- вершины `m0`, `m1`, `m2` соответствуют маркировкам;
-- рёбра `e0`, `e1`, `e2` соответствуют срабатываниям переходов;
-- вес ребра равен `fire_time` перехода.
+`DirectedGraph` хранит:
 
-После построения графа функция `algorithm_request()` определяет начальную и целевую вершины:
+- `index_by_id_`;
+- `vertex_ids_`;
+- `adjacency_`;
+- `edge_count_`.
 
-- если `source = "initial"`, используется `reachability.initial_vertex_id`;
-- если задан `target`, он используется как id вершины;
-- если задан `target_marking`, вызывается `find_marking_vertex()`.
+Методы:
 
-Затем создаётся `AlgorithmParams` и вызывается:
+- `add_vertex(id)`;
+- `add_edge(edge)`;
+- `has_vertex(id)`;
+- `vertex_ids()`;
+- `edges_from(id)`;
+- `edge_between(source, target)`;
+- `vertex_count()`;
+- `edge_count()`.
 
-```cpp
-run_algorithm(algorithm, reachability.graph, algorithm_params)
-```
+`ReachabilityOptions` содержит `max_states` и `max_depth`.
 
-Функция `run_algorithm()` находится в `src/runtime/algorithm_runtime.cpp`. Она выбирает одну из функций:
+`ReachabilityGraph` содержит:
 
-- `run_bfs()` из `src/algorithms/algorithms.cpp`;
-- `run_dfs()` из `src/algorithms/algorithms.cpp`;
-- `run_dijkstra()` из `src/algorithms/algorithms.cpp`.
+- `DirectedGraph graph`;
+- `initial_vertex_id`;
+- `markings`;
+- `depths`.
 
-Результат алгоритма содержит путь по id вершин графа достижимости. JSON-адаптер преобразует этот путь через `path_to_json()`: для каждой вершины добавляется её маркировка, а для вершин после первой добавляется `via_transition`, то есть переход, по которому пришли в эту маркировку.
+`build_reachability_graph(net, options)` строит ограниченный граф достижимости. Начальная вершина получает id `m0`. Новые вершины получают id `m1`, `m2` и далее. Рёбра получают id `e0`, `e1` и далее. Повторная маркировка определяется через `Marking::key()`.
 
-Финальный JSON-ответ алгоритма содержит:
+`find_marking_vertex()` ищет вершину по целевой маркировке.
 
-- `request_id`;
-- `status`;
+`reachability_graph_to_json()` сериализует вершины, глубины, маркировки и рёбра графа достижимости.
+
+### Adjacency list, FSF и BSF
+
+`AdjacencyList` содержит список вершин и строки смежности. Каждая строка `AdjacencyListRow` содержит id вершины и исходящие рёбра `AdjacencyListEdge`.
+
+`ForwardStarForm` содержит:
+
+- `vertex_ids`;
+- `row_offsets`;
+- `edge_ids`;
+- `target_vertex_ids`;
+- `target_indices`;
+- `labels`;
+- `weights`.
+
+`BackwardStarForm` содержит:
+
+- `vertex_ids`;
+- `row_offsets`;
+- `edge_ids`;
+- `source_vertex_ids`;
+- `source_indices`;
+- `labels`;
+- `weights`.
+
+Функции `adjacency_list_from_graph()`, `forward_star_from_graph()`, `backward_star_from_graph()` преобразуют `DirectedGraph` в соответствующие формы.
+
+Функции `*_from_reachability_graph()` делают то же самое для `ReachabilityGraph`.
+
+Функции `*_to_json()` и `*_from_json()` сериализуют и валидируют эти формы. Валидация проверяет массивы, индексы вершин, размеры массивов рёбер и монотонность `row_offsets`.
+
+### DFS, BFS и Dijkstra
+
+Алгоритмы объявлены в `algorithms.hpp` и реализованы в `algorithms.cpp`.
+
+`AlgorithmParams` содержит:
+
+- `source_vertex_id`;
+- необязательный `target_vertex_id`.
+
+`AlgorithmMetrics` содержит:
+
+- `elapsed_ms`;
+- `visited_vertices`;
+- `scanned_edges`;
+- `path_length`;
+- `path_cost`.
+
+`AlgorithmResult` содержит:
+
 - `algorithm`;
-- `graph_mode`;
+- `status`;
 - `found`;
 - `path`;
-- `metrics`;
-- `graph.vertices`;
-- `graph.edges`.
+- `metrics`.
 
-### Вход через CLI
+Перед запуском каждый алгоритм вызывает `validate_source()`. Если исходная вершина отсутствует, возвращается `UNKNOWN_NODE_ID`. Если целевая вершина задана и отсутствует, возвращается `TARGET_NOT_FOUND`.
 
-Файл `src/cli/petri_cli.cpp` даёт альтернативный вход. Он читает JSON сети из файла, сам формирует объект запроса и затем вызывает тот же `petri::handle_request()`, что и внешний JSON API.
+`run_bfs()` использует `std::queue`, множество посещённых вершин и карту родителей. BFS подходит для кратчайшего пути по числу рёбер.
 
-Поэтому CLI не содержит отдельной логики моделирования. Он только подготавливает запрос и печатает ответ.
+`run_dfs()` использует `std::stack`, множество посещённых вершин и карту родителей. DFS подходит для обхода и поиска любого достижимого пути.
 
-## 5. Сборка и тесты
+`run_dijkstra()` использует `std::priority_queue`, расстояния и карту родителей. Он учитывает веса рёбер. Если встречает отрицательный вес, возвращает `NEGATIVE_EDGE_WEIGHT`.
 
-Проект собирается через CMake на Windows. Команды нужно выполнять из корня репозитория `petri_net_simulator`.
+Вспомогательные функции:
+
+- `reconstruct_path()` восстанавливает путь;
+- `path_cost()` считает стоимость пути;
+- `make_traversal_result()` собирает общий результат;
+- `elapsed_ms()` считает время.
+
+### Algorithm runtime
+
+`AlgorithmRunContext` хранит служебный контекст запуска:
+
+- `request_id`;
+- `task_type`;
+- количество мест, переходов и дуг;
+- число построенных состояний;
+- флаг `log_metrics`;
+- путь к файлу метрик.
+
+`AlgorithmTask` хранит имя алгоритма, указатель на граф и контекст.
+
+Абстрактный класс `Algorithm` задаёт интерфейс:
+
+- `name()`;
+- `run(graph, params)`.
+
+`AlgorithmRegistry` хранит зарегистрированные алгоритмы в `std::map`.
+
+Методы `AlgorithmRegistry`:
+
+- `register_algorithm(shared_ptr<Algorithm>)`;
+- `register_algorithm(name, runner)`;
+- `has_algorithm(name)`;
+- `available_algorithms()`;
+- `run(task, params)`.
+
+`create_builtin_algorithm_registry()` регистрирует `dfs`, `bfs`, `dijkstra`.
+
+`run_algorithm(name, graph, params)` остаётся удобной короткой функцией, которая создаёт `AlgorithmTask` и запускает встроенный runtime.
+
+Если включён `task.context.log_metrics`, runtime пишет запись через `append_metrics_record()`.
+
+### Algorithm selector
+
+`SelectionWeights` задаёт веса критериев:
+
+- `elapsed_ms`;
+- `path_length`;
+- `path_cost`;
+- `visited_vertices`.
+
+`AlgorithmSelectionRequest` содержит:
+
+- `AlgorithmTask`;
+- `AlgorithmParams`;
+- список алгоритмов;
+- веса;
+- флаг `require_found`.
+
+`select_algorithm()` запускает кандидатов, собирает `AlgorithmCandidateReport` и выбирает лучший результат с минимальным score.
+
+`score_algorithm_result()` считает score как сумму выбранных метрик с весами.
+
+`algorithm_selection_report_to_json()` возвращает JSON с:
+
+- `best_algorithm`;
+- `criteria`;
+- `comparison`;
+- `best_result`.
+
+### Метрики
+
+`RunMetricsInput` и `RunMetricsRecord` содержат:
+
+- `request_id`;
+- `algorithm_name`;
+- `task_type`;
+- количество мест, переходов и дуг;
+- количество построенных состояний;
+- количество просмотренных рёбер;
+- время;
+- найден ли путь;
+- стоимость пути;
+- длина пути;
+- текст ошибки.
+
+`create_metrics_record()` переносит данные из input в record.
+
+`metrics_record_to_json()` формирует JSON.
+
+`metrics_record_from_json()` читает JSON и валидирует поля.
+
+`append_metrics_record()` добавляет строку JSON в JSONL-файл.
+
+`read_metrics_records()` читает JSONL-файл и возвращает записи.
+
+В `service_adapter` метрики пишутся автоматически для симуляций и алгоритмических запросов. В `runtime` метрики пишутся, если включить `AlgorithmRunContext::log_metrics`.
+
+### Storage API
+
+`StorageConfig` содержит корневую папку, по умолчанию `data`.
+
+`StoredArtifact` содержит id сохранённого объекта и путь к файлу.
+
+`models_directory()`, `runs_directory()`, `metrics_directory()` возвращают подпапки хранилища.
+
+`generate_run_id()` создаёт id запуска на основе времени и случайного числа.
+
+`save_model(model_id, model)` сохраняет JSON-модель в `data/models/<id>.json`.
+
+`save_model(model)` использует `model.name`, если оно есть, иначе создаёт id.
+
+`load_model(model_id)` читает модель.
+
+`save_run_result(run_result)` сохраняет JSON-результат запуска в `data/runs/<run_id>.json`.
+
+`load_run_result(run_id)` читает результат.
+
+`save_metrics(run_id, metrics)` сохраняет объект или массив метрик в JSONL-файл `data/metrics/<run_id>.jsonl`.
+
+Id очищаются функцией `sanitize_storage_id()`: недопустимые символы заменяются на `_`, начальные и конечные точки удаляются. Пустой id возвращает `INVALID_STORAGE_ID`.
+
+### JSON service adapter
+
+`JsonServiceAdapter::handle(request)` принимает JSON-объект. Он проверяет поле `mode` и направляет запрос:
+
+- `simulate` в `simulate_request()`;
+- `algorithm` в `algorithm_request()`.
+
+`JsonServiceAdapter::handle_json(request_json)` принимает строку, парсит JSON и возвращает строку JSON.
+
+`simulate_request()`:
+
+1. Читает `request_id`.
+2. Загружает `PetriNet` из поля `net`.
+3. Валидирует `params`.
+4. Создаёт `Interpreter`.
+5. Выполняет `Interpreter::run()`.
+6. Возвращает JSON с `initial_marking`, `final_marking`, `events`, `metrics`.
+7. Записывает метрики в `logs/metrics.jsonl`.
+
+`algorithm_request()`:
+
+1. Читает `request_id`.
+2. Загружает `PetriNet`.
+3. Валидирует `params`.
+4. Проверяет `graph_mode`. Сейчас поддерживается только `reachability_graph`.
+5. Строит `ReachabilityGraph`.
+6. Определяет source и target.
+7. Создаёт `AlgorithmTask`.
+8. Запускает runtime через `run(task, algorithm_params)`.
+9. Возвращает JSON с путём, метриками и размером графа.
+10. Runtime записывает метрики, потому что `task.context.log_metrics = true`.
+
+`error_response()` возвращает единый JSON ошибки.
+
+### Python bindings
+
+Python bindings строятся только если CMake нашёл Python3 development files и `pybind11`.
+
+Функция `py_to_json()` принимает Python-объект. Если это строка, она парсится как JSON. Иначе объект сериализуется через Python-модуль `json`.
+
+Функция `json_to_py()` возвращает Python dict/list через `json.loads()`.
+
+Функция `net_from_python()` создаёт `PetriNet` из Python-объекта.
+
+Функция `marking_from_python()` строит `Marking`. Если маркировка не передана, используется начальная маркировка.
+
+Экспортируемые функции модуля `petri_core`:
+
+- `load_petri_net_from_json`;
+- `get_enabled_transitions`;
+- `fire_transition`;
+- `run_simulation`;
+- `run_algorithm`;
+- `select_algorithm`.
+
+Ошибки `Result` превращаются в `py::value_error` с кодом и сообщением.
+
+## 5. Поток данных
+
+### Общая схема
+
+Реальный поток данных в текущем коде:
+
+```text
+JSON сети Петри
+  -> net_from_request()
+  -> PetriNet::from_json()
+  -> валидация
+  -> PetriNet
+  -> simulate_request() или algorithm_request()
+  -> JSON-ответ
+  -> запись метрик в logs/metrics.jsonl
+```
+
+Важно: в текущем коде симуляция и алгоритмы являются двумя режимами JSON API. Режим `simulate` идёт через `Interpreter`. Режим `algorithm` строит граф достижимости напрямую из `PetriNet`, а не через объект `Interpreter`.
+
+### Поток симуляции
+
+```text
+handle_request()
+  -> simulate_request()
+  -> net_from_request()
+  -> PetriNet::from_json()
+  -> Interpreter::run()
+  -> Interpreter::step()
+  -> PetriNet::enabled_transitions()
+  -> PetriNet::fire_transition()
+  -> event_to_json()
+  -> JSON response
+  -> append_metrics_record()
+```
+
+Входные данные: JSON с `mode = "simulate"`, полем `net` и параметрами `max_steps`, `strategy`, `stop_on_deadlock`, `return_events`, `transition_id`.
+
+Выходные данные: JSON со статусом, именем модели, начальной и финальной маркировкой, событиями и метриками.
+
+### Поток алгоритмов
+
+```text
+handle_request()
+  -> algorithm_request()
+  -> net_from_request()
+  -> PetriNet::from_json()
+  -> build_reachability_graph()
+  -> DirectedGraph inside ReachabilityGraph
+  -> run(task, params)
+  -> AlgorithmRegistry::run()
+  -> run_dfs() / run_bfs() / run_dijkstra()
+  -> path_to_json()
+  -> JSON response
+  -> append_metrics_record()
+```
+
+Входные данные: JSON с `mode = "algorithm"`, полем `net` и параметрами `graph_mode`, `algorithm`, `max_states`, `max_depth`, `source`, `target` или `target_marking`.
+
+Выходные данные: JSON с алгоритмом, путём, метриками и размером построенного графа.
+
+### Поток построения графа достижимости
+
+`build_reachability_graph()` начинает с `net.initial_marking()`. Для каждой маркировки:
+
+1. Получает разрешённые переходы через `enabled_transitions()`.
+2. Для каждого перехода получает новую маркировку через `fire_transition()`.
+3. Проверяет, встречалась ли такая маркировка по `Marking::key()`.
+4. Добавляет вершину, если маркировка новая.
+5. Добавляет ребро с label = transition id и weight = `fire_time`.
+
+Ограничения задаются `max_states` и `max_depth`.
+
+### Поток метрик
+
+Для симуляции `simulate_request()` напрямую вызывает внутреннюю функцию логирования и пишет запись в `logs/metrics.jsonl`.
+
+Для алгоритмов `algorithm_request()` создаёт `AlgorithmTask` с `log_metrics = true`. После запуска алгоритма `AlgorithmRegistry::run()` пишет метрики через `append_metrics_record()`.
+
+Для ручного логирования можно использовать `logging_metrics` напрямую.
+
+### Поток сохранения результатов
+
+`storage_api` реализован, но не подключён автоматически к `service_adapter`.
+
+Если вызывающий код хочет сохранить модель, результат или метрики, он должен отдельно вызвать:
+
+- `save_model()`;
+- `save_run_result()`;
+- `save_metrics()`.
+
+Поэтому текущий JSON API возвращает результат и пишет метрики, но не сохраняет автоматически полный JSON-ответ в `data/runs`.
+
+### Поток Python bindings
+
+```text
+Python dict/list/string
+  -> py_to_json()
+  -> C++ функции PetriNet / service_adapter / selector
+  -> nlohmann::json
+  -> json_to_py()
+  -> Python dict/list
+```
+
+Python-функции `run_simulation()` и `run_algorithm()` формируют такие же запросы, как JSON service adapter.
+
+## 6. Как собрать проект
+
+Команды выполняются из корня репозитория `petri_net_simulator`.
 
 ### Генерация build-файлов
 
-```bash
+```powershell
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 ```
 
-Эта команда создаёт или обновляет папку `build/`. В текущей конфигурации там появляются файлы Visual Studio, включая решение:
+Если `cmake` не найден в `PATH`, можно использовать CMake из Visual Studio:
 
-```text
-build/petri_net_simulator.sln
+```powershell
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -S . -B build -DCMAKE_BUILD_TYPE=Debug
 ```
 
 ### Сборка
 
-```bash
-cmake --build build
+```powershell
+cmake --build build --config Debug
 ```
 
-После сборки основные результаты находятся в:
+Или полным путём:
+
+```powershell
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" --build build --config Debug
+```
+
+### Запуск тестов
+
+Для Visual Studio generator нужно указывать конфигурацию:
+
+```powershell
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+Или полным путём:
+
+```powershell
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe" --test-dir build -C Debug --output-on-failure
+```
+
+### Где искать результаты сборки
+
+Для Debug-сборки основные файлы находятся в:
 
 ```text
 build/Debug/petri_core.lib
@@ -1022,115 +1012,162 @@ build/Debug/petri_cli.exe
 build/Debug/petri_tests.exe
 ```
 
-`petri_core.lib` — статическая библиотека с основным кодом.
+Если Python bindings собраны, модуль `petri_core` также находится в папке конфигурации сборки, обычно `build/Debug`.
 
-`petri_cli.exe` — консольная программа для ручного запуска.
-
-`petri_tests.exe` — исполняемый файл с тестами.
-
-### Запуск тестов
-
-```bash
-ctest --test-dir build --output-on-failure
-```
-
-CTest запускает тест `petri_tests`, который зарегистрирован в `CMakeLists.txt`. Рабочая директория теста установлена на корень проекта, поэтому тесты могут читать `examples/mutex.json`.
-
-Логи CTest появляются в:
+Логи CTest находятся в:
 
 ```text
 build/Testing/Temporary/
 ```
 
-Например, подробный лог последнего запуска обычно находится в:
+Метрики запусков по умолчанию пишутся в:
 
 ```text
-build/Testing/Temporary/LastTest.log
+logs/metrics.jsonl
 ```
 
-### Какие тесты сейчас есть
+Файлы `storage_api` по умолчанию создаются в:
 
-`core_pn_tests.cpp` проверяет:
+```text
+data/models/
+data/runs/
+data/metrics/
+```
 
-- загрузку `examples/mutex.json`;
+### Запуск примеров
+
+Симуляция через CLI:
+
+```powershell
+.\build\Debug\petri_cli.exe examples\mutex.json simulate
+```
+
+BFS через CLI:
+
+```powershell
+.\build\Debug\petri_cli.exe examples\mutex.json bfs
+```
+
+DFS через CLI:
+
+```powershell
+.\build\Debug\petri_cli.exe examples\mutex.json dfs
+```
+
+Dijkstra через CLI:
+
+```powershell
+.\build\Debug\petri_cli.exe examples\mutex.json dijkstra
+```
+
+Python-пример, если собран модуль `petri_core`:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path build\Debug).Path
+python examples\python_demo.py
+```
+
+Если `pybind11` или Python development files не найдены, CMake выводит предупреждение и пропускает сборку Python-модуля. C++-ядро и C++-тесты при этом продолжают собираться.
+
+## 7. Как использовать проект для демонстрации
+
+Для защиты удобно показать три сценария.
+
+### 1. Сборка и тесты
+
+```powershell
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+Это показывает, что проект собирается и все тесты проходят.
+
+### 2. Симуляция сети Петри
+
+```powershell
+.\build\Debug\petri_cli.exe examples\mutex.json simulate
+```
+
+В ответе видно:
+
 - начальную маркировку;
-- валидацию направления дуг;
-- валидацию количества токенов;
-- поиск разрешённых переходов;
-- атомарное срабатывание перехода;
-- запись событий интерпретатора;
-- автоматический запуск симуляции.
+- финальную маркировку;
+- список событий;
+- сработавшие переходы;
+- метрики симуляции.
 
-`algorithms_tests.cpp` проверяет:
+### 3. Поиск пути в графе достижимости
 
-- BFS для поиска кратчайшего невзвешенного пути;
-- DFS для достижения цели;
-- Dijkstra для учёта весов рёбер;
-- ошибку `UNKNOWN_ALGORITHM`.
+```powershell
+.\build\Debug\petri_cli.exe examples\mutex.json bfs
+.\build\Debug\petri_cli.exe examples\mutex.json dijkstra
+```
 
-`algorithm_selector_tests.cpp` проверяет:
+Можно показать, что BFS ищет путь по числу шагов, а Dijkstra учитывает веса рёбер, которые в графе достижимости берутся из `fire_time`.
 
-- выбор BFS при приоритете минимальной длины пути;
-- выбор Dijkstra при приоритете минимальной стоимости пути;
-- формирование JSON-отчёта с таблицей сравнения;
-- сохранение ошибочного кандидата в отчёте при неизвестном имени алгоритма.
+### 4. Python-интеграция
 
-`graph_models_tests.cpp` проверяет:
+Если собран модуль `petri_core`:
 
-- преобразование `ReachabilityGraph` в adjacency list;
-- преобразование `ReachabilityGraph` в FSF;
-- преобразование `ReachabilityGraph` в BSF;
-- JSON round-trip для adjacency list, FSF и BSF.
+```powershell
+$env:PYTHONPATH = (Resolve-Path build\Debug).Path
+python examples\python_demo.py
+```
 
-`integration_contract_tests.cpp` проверяет:
+Этот пример показывает, что C++-ядро можно вызывать из Python и получать обычные Python dict/list.
 
-- контрактный JSON-запрос симуляции и форму ответа;
-- контрактные JSON-запросы BFS и Dijkstra;
-- наличие маршрута, метрик, графовых счётчиков и маркировок состояний в ответе алгоритма;
-- строковый вход `handle_request_json()`;
-- структурированную ошибку `UNKNOWN_ALGORITHM`.
+## 8. Что уже реализовано
 
-`integration_tests.cpp` проверяет:
+Реально реализованные возможности:
 
-- построение графа достижимости для `mutex.json`;
-- поиск вершины по маркировке;
-- запуск BFS по графу достижимости;
-- использование `fire_time` как веса рёбер для Dijkstra.
+- C++20/CMake-проект.
+- Статическая библиотека `petri_core`.
+- CLI-приложение `petri_cli`.
+- Базовая модель сети Петри: места, переходы, дуги, маркировки.
+- Загрузка сети Петри из JSON.
+- Валидация JSON-модели.
+- Проверка разрешённых переходов.
+- Атомарное срабатывание перехода.
+- Пошаговая симуляция.
+- Стратегии симуляции `first_enabled`, `by_id`, `round_robin`.
+- JSON-ответы симуляции.
+- Ориентированный граф `DirectedGraph`.
+- Ограниченный граф достижимости.
+- Поиск вершины графа достижимости по целевой маркировке.
+- Adjacency list, FSF и BSF.
+- JSON-сериализация и десериализация графовых форм.
+- DFS.
+- BFS.
+- Dijkstra для неотрицательных весов.
+- Единый результат алгоритмов с метриками.
+- Runtime-реестр алгоритмов.
+- Регистрация пользовательского алгоритма через runner.
+- Логирование метрик runtime.
+- Algorithm selector с weighted scoring.
+- JSON service adapter для `simulate` и `algorithm`.
+- Единый формат JSON-ошибок.
+- Автоматическая запись метрик service adapter в `logs/metrics.jsonl`.
+- Файловый `storage_api` для моделей, запусков и метрик.
+- Опциональные Python bindings через `pybind11`.
+- Python demo.
+- C++ unit/integration tests.
+- Python smoke test, если Python-модуль собран.
 
-`service_adapter_tests.cpp` проверяет:
+## 9. Что ещё не реализовано или ограничено
 
-- JSON-ответ симуляции;
-- JSON-ответ алгоритма;
-- JSON-ответ Dijkstra с метрикой стоимости пути;
-- ошибку некорректных параметров симуляции;
-- ошибку некорректной сети;
-- ошибку неизвестного алгоритма;
-- ошибку недостижимой цели;
-- ошибку превышения лимита состояний;
-- строковый вход `handle_request_json()` для некорректного JSON.
+Ограничения текущей версии:
 
-`storage_api_tests.cpp` проверяет:
+- HTTP-сервер не реализован. Есть только библиотечный JSON adapter.
+- GUI и визуализация не входят в этот репозиторий.
+- В JSON adapter поддержан только `graph_mode = "reachability_graph"`. `structural_graph` пока возвращает ошибку.
+- Ингибиторные, цветные и стохастические сети Петри не реализованы.
+- Расширения временных сетей сверх поля `fire_time` не реализованы.
+- Граф достижимости ограничен параметрами `max_states` и `max_depth`; полный бесконечный граф не строится.
+- DFS/BFS/Dijkstra работают с `DirectedGraph`. FSF/BSF уже реализованы как представления данных, но алгоритмы напрямую их не используют.
+- `storage_api` не подключён автоматически к JSON adapter. Полные JSON-ответы не сохраняются в `data/runs` без отдельного вызова `save_run_result()`.
+- Python-модуль собирается только при наличии `pybind11` и Python development files.
+- Нет транзакционной базы данных. Хранилище использует обычные JSON и JSONL-файлы.
+- Нет отдельного сетевого протокола. Интеграция выполняется через JSON-объекты, строки JSON, CLI или Python bindings.
 
-- сохранение и загрузку JSON-модели сети Петри;
-- сохранение и загрузку JSON-результата запуска с уникальным `run_id`;
-- сохранение одной записи метрик в JSONL;
-- сохранение массива метрик несколькими строками JSONL;
-- ошибку `INVALID_STORAGE_ID` для пустого id модели.
-
-`python_smoke_test.py` проверяет:
-
-- импорт собранного модуля `petri_core`;
-- функции `load_petri_net_from_json()`, `get_enabled_transitions()` и `fire_transition()`;
-- `run_simulation()` и `run_algorithm()` через JSON-адаптер;
-- `select_algorithm()` через слой выбора алгоритма.
-
-## 6. Что ещё не реализовано в текущем коде
-
-Эти части могут быть запланированы в общем проекте, но в текущем состоянии репозитория их исходного кода нет:
-
-- HTTP-сервис или отдельный серверный адаптер.
-- Режим `structural_graph` в JSON API. Сейчас `algorithm_request()` принимает только `reachability_graph`.
-- Ингибиторные, цветные и стохастические сети Петри.
-- Хранение запусков или результатов в базе данных.
-
-Это важно учитывать при использовании документации: описанные выше классы и функции уже реализованы, а перечисленные в этом разделе возможности пока отсутствуют.
+Эти ограничения важны для пояснительной записки: они показывают границы текущего реализованного ядра и отделяют готовую функциональность от будущих направлений развития.
